@@ -1,0 +1,13 @@
+.vs/
+.vscode/*.log
+
+DerivedDataCache/
+Intermediate/
+Saved/
+
+*.log
+*.tmp
+*.user
+*.suo
+Thumbs.db
+Desktop.ini

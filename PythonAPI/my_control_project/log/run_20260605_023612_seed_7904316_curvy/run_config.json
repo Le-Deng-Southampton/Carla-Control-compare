@@ -1,0 +1,78 @@
+{
+  "collision_zero_speed_threshold": 0.1,
+  "collision_zero_speed_timeout": 2.0,
+  "controllers": [
+    "lqr",
+    "pid",
+    "mpc"
+  ],
+  "destination_index": 83,
+  "destination_location": {
+    "x": 2.3857624530792236,
+    "y": -67.94117736816406,
+    "z": 0.0
+  },
+  "error_provider": "ground_truth",
+  "lqr": {
+    "curvature_alpha": 0.35,
+    "derivative_alpha": 0.2,
+    "feedforward_gain": 1.0,
+    "max_steer": 0.55,
+    "max_steer_rate": 0.16,
+    "q_epsi": 4.5,
+    "q_epsi_dot": 3.0,
+    "q_ey": 2.8,
+    "q_ey_dot": 1.2,
+    "r": 10.0
+  },
+  "mpc": {
+    "horizon": 12,
+    "kd_long": 0.06,
+    "ki_long": 0.01,
+    "kp_long": 0.6,
+    "max_steer": 0.65,
+    "max_steer_rate": 0.3,
+    "q_psi": 14.0,
+    "q_y": 10.0,
+    "r_steer": 0.9,
+    "r_steer_rate": 1.2
+  },
+  "noise_heading_std_deg": 1.0,
+  "noise_lateral_std": 0.1,
+  "pid": {
+    "lat_kd": 0.38,
+    "lat_ki": 0.005,
+    "lat_kp": 0.72,
+    "long_kd": 0.1,
+    "long_ki": 0.01,
+    "long_kp": 0.45,
+    "max_brake": 0.28,
+    "max_throttle": 1.0
+  },
+  "route": {
+    "length_m": 3010.107846736908,
+    "route_shape": "curvy",
+    "sign_changes": 0,
+    "total_abs_turn_deg": 2090.6140525937058,
+    "turn_segments": 0,
+    "waypoints": 2882
+  },
+  "seed": 7904316,
+  "spawn_index": 11,
+  "speed_planner": {
+    "heading_error_critical_deg": 18.0,
+    "heading_error_rate_critical_deg": 16.0,
+    "heading_error_rate_warning_deg": 8.0,
+    "heading_error_warning_deg": 12.0,
+    "lateral_error_critical": 2.6,
+    "lateral_error_rate_critical": 1.6,
+    "lateral_error_rate_warning": 0.8,
+    "lateral_error_warning": 1.6,
+    "max_accel": 3.5,
+    "max_decel": 9.0,
+    "max_lateral_accel": 16.0,
+    "min_turn_speed_kmh": 38.0,
+    "recovery_hold_steps": 3
+  },
+  "target_speed_kmh": 120.0
+}

@@ -1,0 +1,50 @@
+{
+  "collision_zero_speed_threshold": 0.1,
+  "collision_zero_speed_timeout": 2.0,
+  "controllers": [
+    "lqr",
+    "pid",
+    "mpc"
+  ],
+  "destination_index": 98,
+  "destination_location": {
+    "x": 91.07682800292969,
+    "y": 122.18524169921875,
+    "z": 0.0
+  },
+  "error_provider": "ground_truth",
+  "lqr": {
+    "max_steer": 0.65,
+    "max_steer_rate": 0.3,
+    "q_epsi": 10.0,
+    "q_epsi_dot": 0.25,
+    "q_ey": 7.5,
+    "q_ey_dot": 0.35,
+    "r": 1.2
+  },
+  "mpc": {
+    "horizon": 12,
+    "kd_long": 0.06,
+    "ki_long": 0.01,
+    "kp_long": 0.6,
+    "max_steer": 0.65,
+    "max_steer_rate": 0.3,
+    "q_psi": 14.0,
+    "q_y": 10.0,
+    "r_steer": 0.9,
+    "r_steer_rate": 1.2
+  },
+  "noise_heading_std_deg": 1.0,
+  "noise_lateral_std": 0.1,
+  "route": {
+    "length_m": 665.7620024681091,
+    "route_shape": "gentle_curve",
+    "sign_changes": 0,
+    "total_abs_turn_deg": 405.20998716354455,
+    "turn_segments": 0,
+    "waypoints": 679
+  },
+  "seed": 615263403,
+  "spawn_index": 92,
+  "target_speed_kmh": 50.0
+}

@@ -1,0 +1,29 @@
+{
+  "collision_zero_speed_threshold": 0.1,
+  "collision_zero_speed_timeout": 2.0,
+  "controllers": [
+    "lqr",
+    "pid",
+    "mpc"
+  ],
+  "destination_index": 61,
+  "destination_location": {
+    "x": -106.49149322509766,
+    "y": -22.225093841552734,
+    "z": 0.0
+  },
+  "error_provider": "ground_truth",
+  "noise_heading_std_deg": 1.0,
+  "noise_lateral_std": 0.1,
+  "route": {
+    "length_m": 684.2075054049492,
+    "route_shape": "s_curve",
+    "sign_changes": 0,
+    "total_abs_turn_deg": 452.4053754210474,
+    "turn_segments": 0,
+    "waypoints": 677
+  },
+  "seed": 694014249,
+  "spawn_index": 96,
+  "target_speed_kmh": 50.0
+}

@@ -1,0 +1,129 @@
+import os
+import sys
+import types
+import unittest
+from types import SimpleNamespace
+
+import numpy as np
+
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PYTHONAPI_ROOT = os.path.dirname(PROJECT_ROOT)
+CARLA_AGENTS_ROOT = os.path.join(PYTHONAPI_ROOT, "carla")
+for path in (PROJECT_ROOT, CARLA_AGENTS_ROOT):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+if "carla" not in sys.modules:
+    carla = types.ModuleType("carla")
+
+    class VehicleControl:
+        pass
+
+    carla.VehicleControl = VehicleControl
+    sys.modules["carla"] = carla
+
+from control.factory import create_tracking_controller
+from control.mpc_controller import MpcController
+
+
+def build_controller_args(**overrides):
+    values = {
+        "target_speed": 30.0,
+        "lqr_q_ey": 7.5,
+        "lqr_q_ey_dot": 0.20,
+        "lqr_q_epsi": 6.0,
+        "lqr_q_epsi_dot": 0.10,
+        "lqr_r": 1.8,
+        "lqr_kp_long": 9.0,
+        "lqr_ki_long": 8.0,
+        "lqr_kd_long": 7.0,
+        "lqr_max_steer": 0.65,
+        "lqr_max_steer_rate": 0.30,
+        "lqr_derivative_alpha": 0.20,
+        "lqr_curvature_alpha": 0.35,
+        "lqr_feedforward_gain": 1.0,
+        "pid_lat_kp": 0.72,
+        "pid_lat_ki": 0.005,
+        "pid_lat_kd": 0.38,
+        "pid_long_kp": 0.22,
+        "pid_long_ki": 0.01,
+        "pid_long_kd": 0.14,
+        "mpc_horizon": 12,
+        "mpc_q_y": 10.0,
+        "mpc_q_psi": 14.0,
+        "mpc_r_steer": 0.9,
+        "mpc_r_steer_rate": 1.2,
+        "mpc_kp_long": 0.31,
+        "mpc_ki_long": 0.02,
+        "mpc_kd_long": 0.09,
+        "mpc_max_steer": 0.65,
+        "mpc_max_steer_rate": 0.30,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+class ResearchMpcControllerTest(unittest.TestCase):
+    def test_zero_error_constant_curve_tracks_reference_steer(self):
+        controller = MpcController(
+            horizon=5,
+            q_y=0.0,
+            q_psi=0.0,
+            r_steer=1.0,
+            r_steer_rate=0.0,
+        )
+
+        steer = controller._solve_mpc_steering(
+            initial_state=np.array([0.0, 0.0]),
+            speed_mps=10.0,
+            curvature=0.04,
+        )
+
+        self.assertAlmostEqual(steer, np.arctan(controller.L * 0.04), places=6)
+
+    def test_prediction_model_accepts_curvature_sequence_as_a_planned_disturbance(self):
+        controller = MpcController(horizon=4)
+
+        phi, gamma, theta = controller._build_prediction_matrices(speed_mps=8.0)
+
+        self.assertEqual(phi.shape, (8, 2))
+        self.assertEqual(gamma.shape, (8, 4))
+        self.assertEqual(theta.shape, (8, 4))
+
+    def test_factory_uses_mpc_longitudinal_parameters_independent_from_lqr(self):
+        controller = create_tracking_controller(
+            "mpc",
+            vehicle=None,
+            args=build_controller_args(
+                lqr_kp_long=9.0,
+                lqr_ki_long=8.0,
+                lqr_kd_long=7.0,
+                mpc_kp_long=0.31,
+                mpc_ki_long=0.02,
+                mpc_kd_long=0.09,
+            ),
+        )
+
+        self.assertEqual(controller._longitudinal_controller.kp, 0.31)
+        self.assertEqual(controller._longitudinal_controller.ki, 0.02)
+        self.assertEqual(controller._longitudinal_controller.kd, 0.09)
+
+    def test_factory_passes_lqr_smoothing_parameters(self):
+        controller = create_tracking_controller(
+            "lqr",
+            vehicle=None,
+            args=build_controller_args(
+                lqr_derivative_alpha=0.18,
+                lqr_curvature_alpha=0.42,
+                lqr_feedforward_gain=0.95,
+            ),
+        )
+
+        self.assertEqual(controller.derivative_alpha, 0.18)
+        self.assertEqual(controller.curvature_alpha, 0.42)
+        self.assertEqual(controller.feedforward_gain, 0.95)
+
+
+if __name__ == "__main__":
+    unittest.main()
