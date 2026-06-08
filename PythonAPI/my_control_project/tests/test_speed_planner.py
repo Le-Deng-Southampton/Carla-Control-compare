@@ -43,7 +43,7 @@ for module_name in ("experiment", "experiment.runtime", "error_providers"):
 
 from Speed_Planing.speed_planner import CurvatureSpeedPlanner, SpeedPlannerConfig
 from experiment.runtime import apply_controller_step, build_curvature_preview, build_speed_planner
-from experiment.logging import LOG_HEADER, build_step_snapshot
+from experiment.logging import LOG_HEADER, SUMMARY_HEADER, build_human_summary, build_step_snapshot
 
 
 class CurvatureSpeedPlannerTest(unittest.TestCase):
@@ -109,6 +109,30 @@ class CurvatureSpeedPlannerTest(unittest.TestCase):
 
         self.assertLess(tight_curve_target * 3.6, 70.0)
 
+    def test_entry_corner_cap_limits_high_speed_before_curve(self):
+        planner = CurvatureSpeedPlanner(SpeedPlannerConfig(base_target_speed_kmh=120.0))
+
+        entry_target = planner.plan_speed_mps(curvatures=[0.0, 0.03], dt=0.05)
+
+        self.assertAlmostEqual(entry_target * 3.6, 70.0)
+        self.assertEqual(planner.last_reason, "entry_curvature")
+
+    def test_entry_corner_cap_scales_with_preview_curvature(self):
+        planner = CurvatureSpeedPlanner(SpeedPlannerConfig(base_target_speed_kmh=120.0))
+
+        entry_target = planner.plan_speed_mps(curvatures=[0.0, 0.025], dt=0.05)
+
+        self.assertGreater(entry_target * 3.6, 70.0)
+        self.assertLess(entry_target * 3.6, 120.0)
+        self.assertEqual(planner.last_reason, "entry_curvature")
+
+    def test_entry_corner_cap_does_not_limit_straight_high_speed(self):
+        planner = CurvatureSpeedPlanner(SpeedPlannerConfig(base_target_speed_kmh=120.0))
+
+        straight_target = planner.plan_speed_mps(curvatures=[0.0, 0.01], dt=0.05)
+
+        self.assertAlmostEqual(straight_target * 3.6, 120.0)
+
     def test_large_lateral_error_triggers_protective_slowdown(self):
         planner = CurvatureSpeedPlanner(SpeedPlannerConfig(base_target_speed_kmh=70.0))
 
@@ -158,6 +182,70 @@ class RuntimeSpeedPlanningTest(unittest.TestCase):
         self.assertIn("speed_plan_risk", LOG_HEADER)
         self.assertIn("speed_plan_reason", LOG_HEADER)
 
+    def test_human_summary_explains_best_controller_and_conditions(self):
+        def make_summary(controller, mean_ey, rms_ey, heading_deg, speed_error, steer_delta):
+            values = {key: "" for key in SUMMARY_HEADER}
+            values.update(
+                {
+                    "controller": controller,
+                    "error_provider": "ground_truth",
+                    "speed_planner_mode": "adaptive",
+                    "route_shape": "s_curve",
+                    "route_label": "s_curve",
+                    "route_min_length_m": 1700.0,
+                    "route_length_tolerance": 0.05,
+                    "noise_lateral_std": 0.1,
+                    "noise_heading_std_deg": 1.0,
+                    "perception_delay_steps": 0,
+                    "perception_dropout_probability": 0.0,
+                    "perception_smoothing_alpha": 1.0,
+                    "spawn_index": 12,
+                    "route_waypoints": 1800,
+                    "target_speed_kmh": 70.0,
+                    "route_total_abs_turn_deg": 240.0,
+                    "route_mean_abs_curvature": 0.012,
+                    "route_max_abs_curvature": 0.045,
+                    "mean_abs_e_y": mean_ey,
+                    "rms_e_y": rms_ey,
+                    "max_abs_e_y": mean_ey * 2.0,
+                    "mean_abs_e_psi_deg": heading_deg,
+                    "rms_e_psi_deg": heading_deg * 1.2,
+                    "mean_abs_speed_error": speed_error,
+                    "mean_abs_steer_delta": steer_delta,
+                    "max_abs_steer_delta": steer_delta * 2.0,
+                    "mean_planned_speed_kmh": 62.0,
+                    "min_planned_speed_kmh": 45.0,
+                    "max_planned_speed_kmh": 70.0,
+                    "speed_plan_reason_none_count": 10,
+                    "speed_plan_reason_entry_curvature_count": 5,
+                }
+            )
+            return [values[key] for key in SUMMARY_HEADER]
+
+        lines = build_human_summary(
+            [
+                make_summary("pid", 0.6, 0.8, 4.0, 1.2, 0.04),
+                make_summary("mpc", 0.3, 0.4, 2.0, 0.6, 0.02),
+            ],
+            {
+                "destination_index": 27,
+                "seed": 123,
+                "route": {
+                    "length_m": 1725.0,
+                    "route_label": "s_curve",
+                    "total_abs_turn_deg": 240.0,
+                    "mean_abs_curvature": 0.012,
+                    "max_abs_curvature": 0.045,
+                },
+            },
+        )
+        text = "\n".join(lines)
+
+        self.assertIn("本次测试中表现最好的是 MPC", text)
+        self.assertIn("测试条件", text)
+        self.assertIn("路线类型：s_curve / s_curve", text)
+        self.assertIn("速度规划：自适应速度规划", text)
+
     def test_build_speed_planner_uses_runtime_args(self):
         args = SimpleNamespace(
             target_speed=80.0,
@@ -174,6 +262,9 @@ class RuntimeSpeedPlanningTest(unittest.TestCase):
             speed_planner_heading_error_rate_warning=7.0,
             speed_planner_heading_error_rate_critical=14.0,
             speed_planner_recovery_hold_steps=4,
+            speed_planner_entry_max_speed=75.0,
+            speed_planner_entry_curvature_threshold=0.03,
+            speed_planner_entry_full_cap_curvature=0.05,
         )
 
         planner = build_speed_planner(args)
@@ -192,6 +283,9 @@ class RuntimeSpeedPlanningTest(unittest.TestCase):
         self.assertAlmostEqual(planner.config.heading_error_rate_warning_rad, np.radians(7.0))
         self.assertAlmostEqual(planner.config.heading_error_rate_critical_rad, np.radians(14.0))
         self.assertEqual(planner.config.recovery_hold_steps, 4)
+        self.assertEqual(planner.config.entry_max_speed_kmh, 75.0)
+        self.assertEqual(planner.config.entry_curvature_threshold, 0.03)
+        self.assertEqual(planner.config.entry_full_cap_curvature, 0.05)
 
     def test_curvature_preview_samples_current_and_forward_route_points(self):
         route_trace = [(object(), None) for _ in range(8)]
@@ -204,6 +298,17 @@ class RuntimeSpeedPlanningTest(unittest.TestCase):
         )
 
         self.assertEqual(preview, [0.02, 0.04, 0.06])
+
+    def test_default_curvature_preview_reaches_far_enough_for_curve_entry(self):
+        route_trace = [(object(), None) for _ in range(100)]
+
+        preview = build_curvature_preview(
+            route_trace,
+            reference_index=10,
+            curvature_fn=lambda trace, index: index,
+        )
+
+        self.assertEqual(preview, [10, 15, 20, 25, 35, 45, 60])
 
     def test_step_snapshot_uses_dynamic_target_speed_for_error(self):
         vehicle = SimpleNamespace(
@@ -272,7 +377,7 @@ class RuntimeSpeedPlanningTest(unittest.TestCase):
 
         self.assertEqual(controller.planned_target_speed_mps, 7.5)
 
-    def test_apply_controller_step_uses_lookahead_target_curvature(self):
+    def test_apply_controller_step_uses_reference_curvature_matching_tracking_errors(self):
         class RecordingController:
             def __init__(self):
                 self.curvature = None
@@ -303,9 +408,9 @@ class RuntimeSpeedPlanningTest(unittest.TestCase):
             vehicle=object(),
             target_waypoint=object(),
             route_trace=route_trace,
-            target_index=2,
+            target_index=3,
             reference_waypoint=object(),
-            reference_index=1,
+            reference_index=2,
         )
 
         self.assertGreater(controller.curvature, 0.0)

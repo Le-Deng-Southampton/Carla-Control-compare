@@ -6,7 +6,12 @@ function Get-CondaCommand {
         return $userConda
     }
 
-    return "conda"
+    $pathConda = Get-Command "conda" -ErrorAction SilentlyContinue
+    if ($pathConda) {
+        return $pathConda.Source
+    }
+
+    throw "conda was not found. Install Miniconda or run PythonAPI\setup_carla37.ps1 after conda is available."
 }
 
 function Invoke-CondaCommand {

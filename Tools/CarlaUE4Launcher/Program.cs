@@ -9,13 +9,16 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        string root = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-        string target = Path.Combine(root, "CarlaUE4", "Binaries", "Win64", "CarlaUE4-Win64-Shipping.exe");
+        string root = ResolveCarlaRoot();
+        string target = root == null
+            ? null
+            : Path.Combine(root, "CarlaUE4", "Binaries", "Win64", "CarlaUE4-Win64-Shipping.exe");
 
-        if (!File.Exists(target))
+        if (root == null || !File.Exists(target))
         {
             MessageBox.Show(
-                "CARLA executable was not found:\r\n" + target,
+                "CARLA executable was not found.\r\n\r\n" +
+                "Move this launcher into the CARLA package, or start it from a shortcut whose working directory is the package root.",
                 "CARLA Launcher",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -46,6 +49,54 @@ internal static class Program
                 MessageBoxIcon.Error);
             return 1;
         }
+    }
+
+    private static string ResolveCarlaRoot()
+    {
+        string[] candidates = new[]
+        {
+            Environment.CurrentDirectory,
+            AppDomain.CurrentDomain.BaseDirectory,
+        };
+
+        foreach (string candidate in candidates)
+        {
+            string root = FindCarlaRoot(candidate);
+            if (root != null)
+            {
+                return root;
+            }
+        }
+
+        return null;
+    }
+
+    private static string FindCarlaRoot(string startPath)
+    {
+        if (string.IsNullOrWhiteSpace(startPath))
+        {
+            return null;
+        }
+
+        DirectoryInfo directory = new DirectoryInfo(Path.GetFullPath(startPath));
+        while (directory != null)
+        {
+            string target = Path.Combine(
+                directory.FullName,
+                "CarlaUE4",
+                "Binaries",
+                "Win64",
+                "CarlaUE4-Win64-Shipping.exe");
+
+            if (File.Exists(target))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
     }
 
     private static string QuoteArguments(string[] args)

@@ -60,15 +60,16 @@ class LqrControllerTest(unittest.TestCase):
 
         controller._update_lqr_gain(50.0 / 3.6)
 
-        np.testing.assert_allclose(controller.Q.diagonal(), [2.8, 1.20, 4.5, 3.0])
-        self.assertEqual(controller.R.item(), 10.0)
+        np.testing.assert_allclose(controller.Q.diagonal(), [2.6, 1.10, 6.0, 2.6])
+        self.assertEqual(controller.R.item(), 8.0)
         self.assertEqual(controller.max_steer, 0.55)
-        self.assertEqual(controller.max_steer_rate, 0.16)
-        self.assertEqual(controller.feedforward_gain, 1.0)
+        self.assertEqual(controller.max_steer_rate, 0.18)
+        self.assertEqual(controller.curvature_alpha, 0.55)
+        self.assertEqual(controller.feedforward_gain, 1.12)
         self.assertLess(controller._gain_matrix[0, 0], 0.8)
-        self.assertLess(controller._gain_matrix[0, 2], 3.6)
+        self.assertLess(controller._gain_matrix[0, 2], 4.4)
 
-    def test_default_curve_feedforward_uses_unamplified_bicycle_reference(self):
+    def test_default_curve_feedforward_uses_tuned_bicycle_reference(self):
         controller = LqrController(
             q_weights=(0.0, 0.0, 0.0, 0.0),
             r_weight=1.0,
@@ -82,7 +83,7 @@ class LqrControllerTest(unittest.TestCase):
         for _ in range(30):
             control = controller.run_step(vehicle, waypoint, curvature=curvature)
 
-        self.assertAlmostEqual(control.steer, np.arctan(controller.L * curvature), places=3)
+        self.assertAlmostEqual(control.steer, controller.feedforward_gain * np.arctan(controller.L * curvature), places=3)
 
     def test_first_sample_does_not_turn_lateral_offset_into_derivative_spike(self):
         controller = LqrController(

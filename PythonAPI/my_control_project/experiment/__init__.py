@@ -1,4 +1,4 @@
-from .logging import LOG_HEADER, SUMMARY_HEADER, save_compare_outputs
+from .logging import LOG_HEADER, SUMMARY_HEADER, build_human_summary, save_compare_outputs
 from .metrics import build_summary, create_metrics
 from .runtime import (
     SimpleHUD,
@@ -14,6 +14,7 @@ __all__ = [
     "LOG_HEADER",
     "SUMMARY_HEADER",
     "SimpleHUD",
+    "build_human_summary",
     "build_summary",
     "compute_lookahead",
     "configure_world",

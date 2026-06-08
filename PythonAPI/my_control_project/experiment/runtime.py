@@ -76,7 +76,7 @@ def route_curvature(route_trace, route_index):
     return float(np.clip(curvature, -0.2, 0.2))
 
 
-def build_curvature_preview(route_trace, reference_index, preview_steps=(0, 5, 10, 15), curvature_fn=route_curvature):
+def build_curvature_preview(route_trace, reference_index, preview_steps=(0, 5, 10, 15, 25, 35, 50), curvature_fn=route_curvature):
     curvatures = []
     last_index = max(0, len(route_trace) - 2)
     for step in preview_steps:
@@ -102,6 +102,9 @@ def build_speed_planner(args):
             heading_error_rate_warning_rad=np.radians(args.speed_planner_heading_error_rate_warning),
             heading_error_rate_critical_rad=np.radians(args.speed_planner_heading_error_rate_critical),
             recovery_hold_steps=args.speed_planner_recovery_hold_steps,
+            entry_max_speed_kmh=args.speed_planner_entry_max_speed,
+            entry_curvature_threshold=args.speed_planner_entry_curvature_threshold,
+            entry_full_cap_curvature=args.speed_planner_entry_full_cap_curvature,
         )
     )
 
@@ -228,7 +231,8 @@ def apply_controller_step(
     planned_target_speed_mps=None,
     tracking_errors=None,
 ):
-    curvature = route_curvature(route_trace, target_index)
+    curvature_index = reference_index if reference_index is not None else target_index
+    curvature = route_curvature(route_trace, curvature_index)
     return controller.run_step(
         vehicle,
         target_waypoint,
@@ -321,13 +325,18 @@ def run_controller_lap(controller_name, world, blueprint_library, vehicle_bp, sp
                 closest_route_index,
                 reference_waypoint=reference_waypoint,
             )
-            curvature_preview = build_curvature_preview(route_trace, closest_route_index)
-            target_speed_ms = runtime["speed_planner"].plan_speed_mps(
-                curvature_preview,
-                getattr(args, "control_dt", 0.05),
-                lateral_error_m=tracking_errors["e_y"],
-                heading_error_rad=tracking_errors["e_psi"],
-            )
+            if args.speed_planner_mode == "off":
+                target_speed_ms = args.target_speed / 3.6
+                runtime["speed_planner"].last_risk = 0.0
+                runtime["speed_planner"].last_reason = "none"
+            else:
+                curvature_preview = build_curvature_preview(route_trace, closest_route_index)
+                target_speed_ms = runtime["speed_planner"].plan_speed_mps(
+                    curvature_preview,
+                    getattr(args, "control_dt", 0.05),
+                    lateral_error_m=tracking_errors["e_y"],
+                    heading_error_rad=tracking_errors["e_psi"],
+                )
             control = apply_controller_step(
                 runtime["controller"],
                 vehicle,

@@ -14,16 +14,16 @@ class LqrController(BaseTrackingController):
     def __init__(
         self,
         target_speed=30.0,
-        q_weights=(2.8, 1.20, 4.5, 3.0),
-        r_weight=10.0,
+        q_weights=(2.6, 1.10, 6.0, 2.6),
+        r_weight=8.0,
         kp_long=0.6,
         ki_long=0.01,
         kd_long=0.06,
         max_steer=0.55,
-        max_steer_rate=0.16,
+        max_steer_rate=0.18,
         derivative_alpha=0.20,
-        curvature_alpha=0.35,
-        feedforward_gain=1.0,
+        curvature_alpha=0.55,
+        feedforward_gain=1.12,
         longitudinal_controller=None,
     ):
         print(">>> USING VEHICLE-GRADE LQR (DYNAMIC BICYCLE MODEL) <<<")

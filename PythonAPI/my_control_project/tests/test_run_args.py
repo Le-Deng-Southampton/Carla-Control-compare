@@ -28,7 +28,7 @@ def install_runtime_stubs():
         sys.modules["pygame"] = types.ModuleType("pygame")
 
     error_providers = types.ModuleType("error_providers")
-    error_providers.get_supported_error_provider_names = lambda: ("ground_truth", "noisy_ground_truth")
+    error_providers.get_supported_error_provider_names = lambda: ("ground_truth", "noisy_ground_truth", "perception_proxy")
     sys.modules["error_providers"] = error_providers
 
     experiment = types.ModuleType("experiment")
@@ -42,7 +42,7 @@ def install_runtime_stubs():
     sys.modules["experiment"] = experiment
 
     route_planner = types.ModuleType("road_planning.route_planner")
-    route_planner.ROUTE_SHAPES = ("straight", "gentle_curve", "curvy", "s_curve")
+    route_planner.ROUTE_SHAPES = ("true_straight", "straight", "gentle_curve", "curvy", "s_curve")
     sys.modules["road_planning.route_planner"] = route_planner
 
 
@@ -57,14 +57,15 @@ class RunArgsTest(unittest.TestCase):
         with mock.patch.object(sys, "argv", ["run_my_control.py"]):
             args = run_my_control.parse_args()
 
-        self.assertEqual(args.lqr_q_ey, 2.8)
-        self.assertEqual(args.lqr_q_ey_dot, 1.20)
-        self.assertEqual(args.lqr_q_epsi, 4.5)
-        self.assertEqual(args.lqr_q_epsi_dot, 3.0)
-        self.assertEqual(args.lqr_r, 10.0)
+        self.assertEqual(args.lqr_q_ey, 2.6)
+        self.assertEqual(args.lqr_q_ey_dot, 1.10)
+        self.assertEqual(args.lqr_q_epsi, 6.0)
+        self.assertEqual(args.lqr_q_epsi_dot, 2.6)
+        self.assertEqual(args.lqr_r, 8.0)
         self.assertEqual(args.lqr_max_steer, 0.55)
-        self.assertEqual(args.lqr_max_steer_rate, 0.16)
-        self.assertEqual(args.lqr_feedforward_gain, 1.0)
+        self.assertEqual(args.lqr_max_steer_rate, 0.18)
+        self.assertEqual(args.lqr_curvature_alpha, 0.55)
+        self.assertEqual(args.lqr_feedforward_gain, 1.12)
 
     def test_speed_planner_cli_defaults_enable_curvature_based_dynamic_speed(self):
         run_my_control = importlib.import_module("run_my_control")
@@ -85,6 +86,28 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.speed_planner_heading_error_rate_warning, 8.0)
         self.assertEqual(args.speed_planner_heading_error_rate_critical, 16.0)
         self.assertEqual(args.speed_planner_recovery_hold_steps, 3)
+        self.assertEqual(args.speed_planner_entry_max_speed, 70.0)
+        self.assertEqual(args.speed_planner_entry_curvature_threshold, 0.015)
+        self.assertEqual(args.speed_planner_entry_full_cap_curvature, 0.03)
+        self.assertEqual(args.speed_planner_mode, "adaptive")
+
+    def test_controller_only_speed_planner_mode_can_be_selected(self):
+        run_my_control = importlib.import_module("run_my_control")
+
+        with mock.patch.object(sys, "argv", ["run_my_control.py", "--speed-planner-mode", "off"]):
+            args = run_my_control.parse_args()
+
+        self.assertEqual(args.speed_planner_mode, "off")
+
+    def test_perception_proxy_cli_defaults_are_disabled(self):
+        run_my_control = importlib.import_module("run_my_control")
+
+        with mock.patch.object(sys, "argv", ["run_my_control.py"]):
+            args = run_my_control.parse_args()
+
+        self.assertEqual(args.perception_delay_steps, 0)
+        self.assertEqual(args.perception_dropout_probability, 0.0)
+        self.assertEqual(args.perception_smoothing_alpha, 1.0)
 
     def test_pid_longitudinal_defaults_are_tuned_for_70_kmh_tracking(self):
         run_my_control = importlib.import_module("run_my_control")

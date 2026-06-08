@@ -20,6 +20,9 @@ class SpeedPlannerConfig:
     heading_error_rate_warning_rad: float = np.radians(8.0)
     heading_error_rate_critical_rad: float = np.radians(16.0)
     recovery_hold_steps: int = 3
+    entry_max_speed_kmh: float = 70.0
+    entry_curvature_threshold: float = 0.015
+    entry_full_cap_curvature: float = 0.03
 
 
 class CurvatureSpeedPlanner:
@@ -29,6 +32,7 @@ class CurvatureSpeedPlanner:
         self.config = config
         self.base_target_speed_mps = config.base_target_speed_kmh / 3.6
         self.min_turn_speed_mps = config.min_turn_speed_kmh / 3.6
+        self.entry_max_speed_mps = config.entry_max_speed_kmh / 3.6
         self._planned_speed_mps = None
         self._prev_lateral_error_m = None
         self._prev_heading_error_rad = None
@@ -63,19 +67,55 @@ class CurvatureSpeedPlanner:
 
     def _raw_target_for_curvature(self, max_abs_curvature):
         if max_abs_curvature <= self.config.curvature_epsilon:
-            return 0.0, self.base_target_speed_mps
+            return 0.0, self.base_target_speed_mps, "none"
+
+        target = self.base_target_speed_mps
+        reason = "none"
+
+        if (
+            max_abs_curvature >= self.config.entry_curvature_threshold
+            and self.base_target_speed_mps > self.entry_max_speed_mps
+        ):
+            span = max(
+                self.config.entry_full_cap_curvature - self.config.entry_curvature_threshold,
+                1e-6,
+            )
+            entry_risk = float(np.clip(
+                (max_abs_curvature - self.config.entry_curvature_threshold) / span,
+                0.0,
+                1.0,
+            ))
+            adaptive_entry_speed = self.base_target_speed_mps - entry_risk * (
+                self.base_target_speed_mps - self.entry_max_speed_mps
+            )
+            entry_target = float(np.clip(
+                adaptive_entry_speed,
+                self.min_turn_speed_mps,
+                self.base_target_speed_mps,
+            ))
+            if entry_target < target:
+                target = entry_target
+                reason = "entry_curvature"
 
         base_lateral_accel = self.base_target_speed_mps ** 2 * max_abs_curvature
-        if base_lateral_accel <= self.config.max_lateral_accel:
-            return 0.0, self.base_target_speed_mps
+        if base_lateral_accel > self.config.max_lateral_accel:
+            lateral_limit = np.sqrt(self.config.max_lateral_accel / max_abs_curvature)
+            lateral_target = float(np.clip(lateral_limit, self.min_turn_speed_mps, self.base_target_speed_mps))
+            if lateral_target < target:
+                target = lateral_target
+                reason = "curvature"
 
-        lateral_limit = np.sqrt(self.config.max_lateral_accel / max_abs_curvature)
-        target = float(np.clip(lateral_limit, self.min_turn_speed_mps, self.base_target_speed_mps))
-        risk = (self.base_target_speed_mps - target) / max(
+        if reason == "none":
+            return 0.0, self.base_target_speed_mps, reason
+
+        risk = self._risk_from_target(target)
+        return float(np.clip(risk, 0.0, 1.0)), target, reason
+
+    def _risk_from_target(self, target):
+        return (self.base_target_speed_mps - target) / max(
             self.base_target_speed_mps - self.min_turn_speed_mps,
             1e-6,
         )
-        return float(np.clip(risk, 0.0, 1.0)), target
 
     def _raw_target_for_error(self, error_value, warning, critical):
         risk = self._risk_between(error_value, warning, critical)
@@ -98,8 +138,9 @@ class CurvatureSpeedPlanner:
         self._prev_lateral_error_m = lateral_error_m
         self._prev_heading_error_rad = heading_error_rad
 
+        curvature_risk, curvature_target, curvature_reason = self._raw_target_for_curvature(max_abs_curvature)
         risk_candidates = [
-            ("curvature", *self._raw_target_for_curvature(max_abs_curvature)),
+            (curvature_reason, curvature_risk, curvature_target),
             (
                 "lateral_error",
                 *self._raw_target_for_error(

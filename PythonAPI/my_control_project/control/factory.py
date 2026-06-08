@@ -36,8 +36,8 @@ def create_tracking_controller(controller_name, vehicle, args):
             max_steer=args.lqr_max_steer,
             max_steer_rate=args.lqr_max_steer_rate,
             derivative_alpha=get_arg(args, "lqr_derivative_alpha", 0.20),
-            curvature_alpha=get_arg(args, "lqr_curvature_alpha", 0.35),
-            feedforward_gain=get_arg(args, "lqr_feedforward_gain", 1.0),
+            curvature_alpha=get_arg(args, "lqr_curvature_alpha", 0.55),
+            feedforward_gain=get_arg(args, "lqr_feedforward_gain", 1.12),
             longitudinal_controller=create_pid_longitudinal_controller(
                 args.target_speed,
                 args.lqr_kp_long,

@@ -53,6 +53,12 @@ def parse_args():
         help="Optional fixed destination spawn point index for repeatable tests.",
     )
     parser.add_argument("--target-speed", type=float, default=70.0, help="Target speed in km/h.")
+    parser.add_argument(
+        "--speed-planner-mode",
+        choices=("off", "adaptive"),
+        default="adaptive",
+        help="Use off for fixed-speed controller-only tests, or adaptive for integrated high-speed safety tests.",
+    )
     parser.add_argument("--seed", type=int, default=None, help="Optional random seed used to reproduce a run.")
     parser.add_argument("--route-resolution", type=float, default=1.0, help="Global route waypoint spacing in meters.")
     parser.add_argument(
@@ -147,6 +153,24 @@ def parse_args():
         help="Control steps to keep protective recovery active after risk clears.",
     )
     parser.add_argument(
+        "--speed-planner-entry-max-speed",
+        type=float,
+        default=70.0,
+        help="Maximum planned speed in km/h when entering a detected curve at high target speed.",
+    )
+    parser.add_argument(
+        "--speed-planner-entry-curvature-threshold",
+        type=float,
+        default=0.015,
+        help="Preview curvature threshold that activates the entry-corner speed cap.",
+    )
+    parser.add_argument(
+        "--speed-planner-entry-full-cap-curvature",
+        type=float,
+        default=0.03,
+        help="Preview curvature where the entry-corner cap reaches speed-planner-entry-max-speed.",
+    )
+    parser.add_argument(
         "--collision-zero-speed-timeout",
         type=float,
         default=2.0,
@@ -194,17 +218,35 @@ def parse_args():
         default=1.0,
         help="Standard deviation of heading-error noise in degrees for noisy_ground_truth.",
     )
-    parser.add_argument("--lqr-q-ey", type=float, default=2.8, help="LQR lateral error weight.")
-    parser.add_argument("--lqr-q-ey-dot", type=float, default=1.20, help="LQR lateral error derivative weight.")
-    parser.add_argument("--lqr-q-epsi", type=float, default=4.5, help="LQR heading error weight.")
-    parser.add_argument("--lqr-q-epsi-dot", type=float, default=3.0, help="LQR heading error derivative weight.")
+    parser.add_argument(
+        "--perception-delay-steps",
+        type=int,
+        default=0,
+        help="Number of control steps to delay noisy/perception-proxy tracking errors.",
+    )
+    parser.add_argument(
+        "--perception-dropout-probability",
+        type=float,
+        default=0.0,
+        help="Probability of reusing the previous noisy/perception-proxy tracking error sample.",
+    )
+    parser.add_argument(
+        "--perception-smoothing-alpha",
+        type=float,
+        default=1.0,
+        help="Blend factor for noisy/perception-proxy tracking errors; 1.0 disables smoothing.",
+    )
+    parser.add_argument("--lqr-q-ey", type=float, default=2.6, help="LQR lateral error weight.")
+    parser.add_argument("--lqr-q-ey-dot", type=float, default=1.10, help="LQR lateral error derivative weight.")
+    parser.add_argument("--lqr-q-epsi", type=float, default=6.0, help="LQR heading error weight.")
+    parser.add_argument("--lqr-q-epsi-dot", type=float, default=2.6, help="LQR heading error derivative weight.")
     parser.add_argument(
         "--lqr-q-iey",
         type=float,
         default=0.0,
         help="Deprecated legacy argument kept for compatibility.",
     )
-    parser.add_argument("--lqr-r", type=float, default=10.0, help="LQR steering effort weight.")
+    parser.add_argument("--lqr-r", type=float, default=8.0, help="LQR steering effort weight.")
     parser.add_argument("--lqr-kp-long", type=float, default=0.6, help="LQR controller longitudinal P gain.")
     parser.add_argument("--lqr-ki-long", type=float, default=0.01, help="LQR controller longitudinal I gain.")
     parser.add_argument("--lqr-kd-long", type=float, default=0.06, help="LQR controller longitudinal D gain.")
@@ -212,7 +254,7 @@ def parse_args():
     parser.add_argument(
         "--lqr-max-steer-rate",
         type=float,
-        default=0.16,
+        default=0.18,
         help="Maximum LQR steering change per control step.",
     )
     parser.add_argument(
@@ -224,13 +266,13 @@ def parse_args():
     parser.add_argument(
         "--lqr-curvature-alpha",
         type=float,
-        default=0.35,
+        default=0.55,
         help="Low-pass blend factor for LQR curvature feedforward.",
     )
     parser.add_argument(
         "--lqr-feedforward-gain",
         type=float,
-        default=1.0,
+        default=1.12,
         help="Gain applied to LQR bicycle-model curvature feedforward.",
     )
     parser.add_argument("--mpc-horizon", type=int, default=12, help="MPC prediction horizon in control steps.")
@@ -292,13 +334,19 @@ def build_run_config(args, controller_order, spawn_index, destination_index, des
         "error_provider": args.error_provider,
         "noise_heading_std_deg": args.noise_heading_std_deg,
         "noise_lateral_std": args.noise_lateral_std,
+        "perception_delay_steps": args.perception_delay_steps,
+        "perception_dropout_probability": args.perception_dropout_probability,
+        "perception_smoothing_alpha": args.perception_smoothing_alpha,
         "collision_zero_speed_timeout": args.collision_zero_speed_timeout,
         "collision_zero_speed_threshold": args.collision_zero_speed_threshold,
         "route": {
             "length_m": route_features["length"],
             "route_shape": args.route_shape,
+            "route_label": route_features.get("route_label", args.route_shape),
             "sign_changes": route_features["sign_changes"],
             "total_abs_turn_deg": float(np.degrees(route_features["total_abs_turn"])),
+            "mean_abs_curvature": route_features.get("mean_abs_curvature", 0.0),
+            "max_abs_curvature": route_features.get("max_abs_curvature", 0.0),
             "turn_segments": route_features["turn_segments"],
             "waypoints": len(route_trace),
         },
@@ -306,6 +354,7 @@ def build_run_config(args, controller_order, spawn_index, destination_index, des
         "spawn_index": spawn_index,
         "target_speed_kmh": args.target_speed,
         "speed_planner": {
+            "mode": args.speed_planner_mode,
             "min_turn_speed_kmh": args.speed_planner_min_turn_speed,
             "max_lateral_accel": args.speed_planner_max_lateral_accel,
             "max_accel": args.speed_planner_max_accel,
@@ -319,6 +368,9 @@ def build_run_config(args, controller_order, spawn_index, destination_index, des
             "heading_error_rate_warning_deg": args.speed_planner_heading_error_rate_warning,
             "heading_error_rate_critical_deg": args.speed_planner_heading_error_rate_critical,
             "recovery_hold_steps": args.speed_planner_recovery_hold_steps,
+            "entry_max_speed_kmh": args.speed_planner_entry_max_speed,
+            "entry_curvature_threshold": args.speed_planner_entry_curvature_threshold,
+            "entry_full_cap_curvature": args.speed_planner_entry_full_cap_curvature,
         },
         "lqr": {
             "q_ey": args.lqr_q_ey,
@@ -380,10 +432,12 @@ def compare_main():
             clamp_spawn_index,
             rng,
         )
+        args.route_label = route_features.get("route_label", args.route_shape)
 
         print(f"Comparison route built: {len(route_trace)} waypoints.")
         print(
             f"Route template: {args.route_shape}, "
+            f"label={args.route_label}, "
             f"length={route_features['length']:.1f} m, "
             f"turn_changes={route_features['sign_changes']}, "
             f"total_turn={np.degrees(route_features['total_abs_turn']):.1f} deg"
@@ -413,7 +467,7 @@ def compare_main():
             )
             all_rows.extend(rows)
             trajectories[controller_name] = (xs, ys)
-            summaries.append(build_summary(controller_name, spawn_index, route_trace, args, metrics))
+            summaries.append(build_summary(controller_name, spawn_index, route_trace, args, metrics, route_features))
             if aborted:
                 print("Comparison stopped by user before both laps finished.")
                 break

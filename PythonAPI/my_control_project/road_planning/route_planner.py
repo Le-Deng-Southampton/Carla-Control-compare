@@ -7,7 +7,8 @@ from agents.navigation.global_route_planner import GlobalRoutePlanner
 from agents.navigation.local_planner import RoadOption
 
 
-ROUTE_SHAPES = ("straight", "gentle_curve", "s_curve", "curvy")
+ROUTE_SHAPES = ("true_straight", "straight", "gentle_curve", "s_curve", "curvy")
+NOMINAL_STRAIGHT_MAX_TURN_RAD = math.radians(20.0)
 
 
 def _angle_diff(a, b):
@@ -48,6 +49,13 @@ def _route_shape_features(route_trace):
             sign_changes += 1
 
     total_abs_turn = sum(abs(delta) for delta in yaw_deltas)
+    abs_curvatures = []
+    for idx, delta in enumerate(yaw_deltas, start=1):
+        prev_loc = route_trace[idx - 1][0].transform.location
+        curr_loc = route_trace[idx][0].transform.location
+        segment_length = max(prev_loc.distance(curr_loc), 1e-6)
+        abs_curvatures.append(abs(delta) / segment_length)
+
     left_turn = sum(max(delta, 0.0) for delta in yaw_deltas)
     right_turn = sum(max(-delta, 0.0) for delta in yaw_deltas)
     dominant_turn = max(left_turn, right_turn)
@@ -62,7 +70,26 @@ def _route_shape_features(route_trace):
         "minor_turn": minor_turn,
         "sign_changes": sign_changes,
         "turn_segments": len(turn_signs),
+        "mean_abs_curvature": sum(abs_curvatures) / len(abs_curvatures) if abs_curvatures else 0.0,
+        "max_abs_curvature": max(abs_curvatures or [0.0]),
     }
+
+
+def classify_route_label(route_shape, features):
+    if route_shape == "true_straight":
+        return "true_straight"
+    if route_shape == "straight" and features["total_abs_turn"] > NOMINAL_STRAIGHT_MAX_TURN_RAD:
+        return "nominal_straight_curved_network"
+    return route_shape
+
+
+def validate_route_shape(route_shape, features):
+    if route_shape == "true_straight" and features["total_abs_turn"] > NOMINAL_STRAIGHT_MAX_TURN_RAD:
+        raise RuntimeError(
+            "Failed to build true_straight route: total_abs_turn_deg="
+            f"{math.degrees(features['total_abs_turn']):.1f} exceeds "
+            f"{math.degrees(NOMINAL_STRAIGHT_MAX_TURN_RAD):.1f} deg."
+        )
 
 
 def _shape_penalty(route_shape, features):
@@ -71,7 +98,7 @@ def _shape_penalty(route_shape, features):
     minor_turn = features["minor_turn"]
     sign_changes = features["sign_changes"]
 
-    if route_shape == "straight":
+    if route_shape in ("true_straight", "straight"):
         return total_abs_turn / math.radians(20.0) + sign_changes * 0.7 + minor_turn / math.radians(8.0)
 
     if route_shape == "gentle_curve":
@@ -219,6 +246,8 @@ def build_shaped_route(
     )
     route_trace, features = _select_shaped_candidate(candidates, route_shape, min_length_m)
     if route_trace is not None:
+        validate_route_shape(route_shape, features)
+        features["route_label"] = classify_route_label(route_shape, features)
         return route_trace, features
 
     print(f"[WARN] No shaped route matched '{route_shape}', falling back to shortest route.")
@@ -226,4 +255,7 @@ def build_shaped_route(
     route_trace = planner.trace_route(origin, destination)
     if not route_trace:
         raise RuntimeError("Failed to build a fixed global route.")
-    return route_trace, _route_shape_features(route_trace)
+    features = _route_shape_features(route_trace)
+    validate_route_shape(route_shape, features)
+    features["route_label"] = classify_route_label(route_shape, features)
+    return route_trace, features

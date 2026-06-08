@@ -35,3 +35,14 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+
+# Python runtime/cache output
+__pycache__/
+*.py[cod]
+
+# Experiment outputs
+PythonAPI/my_control_project/log/
+
+# Local C# launcher build output
+Tools/CarlaUE4Launcher/bin/
+Tools/CarlaUE4Launcher/obj/
