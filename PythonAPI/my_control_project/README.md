@@ -30,7 +30,6 @@ my_control_project/
 +-- error_providers/           # ground_truth, noisy_ground_truth, perception_proxy error sources
 +-- experiment/                # Runtime loop, collision termination, metrics, logs
 +-- tests/                     # Unit/regression tests for current project modules
-+-- legacy/                    # Compatibility wrapper for older imports
 +-- log/                       # Per-run CSV, JSON, trajectory figure, console outputs
 ```
 
@@ -72,8 +71,8 @@ Integrated high-speed system comparison, with adaptive speed planning:
 
 - Runs `lqr`, `pid`, and `mpc` in one launch.
 - Generates a random route shape unless `--route-shape` is provided. Use
-  `true_straight` for strict straight-road experiments; legacy `straight` is a
-  route template and may still follow a curved road-network segment.
+  `true_straight` for strict straight-road experiments. The `straight` route is
+  a nominal route template and may still follow a curved road-network segment.
 - Keeps the route fixed within one launch for fair controller comparison.
 - Separates two experiment modes. `--speed-planner-mode off` keeps the fixed
   target speed and is intended for pure controller comparison. The default

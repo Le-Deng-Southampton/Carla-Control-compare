@@ -14,6 +14,9 @@ from .metrics import create_metrics
 from .termination import CollisionZeroSpeedTerminator
 
 
+ROUTE_CLOSE_DISTANCE_M = 8.0
+
+
 class SimpleHUD:
     def __init__(self, width, height):
         self.width = width
@@ -204,7 +207,7 @@ def resolve_route_setup(world, args, clamp_spawn_index, rng):
         args.route_resolution,
         args.route_min_length_m,
         args.route_max_waypoints,
-        args.route_close_distance,
+        ROUTE_CLOSE_DISTANCE_M,
         route_shape=args.route_shape,
         length_tolerance=args.route_length_tolerance,
     )

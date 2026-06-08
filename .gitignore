@@ -39,6 +39,7 @@ TestResults.xml
 # Python runtime/cache output
 __pycache__/
 *.py[cod]
+*$py.class
 
 # Experiment outputs
 PythonAPI/my_control_project/log/

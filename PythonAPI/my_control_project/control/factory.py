@@ -4,7 +4,7 @@ from .mpc_controller import MpcController
 from .pid_controller import PidControllerAdapter
 
 
-def get_supported_controller_names(include_placeholders=False):
+def get_supported_controller_names():
     return ("lqr", "pid", "mpc")
 
 
@@ -95,5 +95,5 @@ def create_tracking_controller(controller_name, vehicle, args):
         )
 
     raise ValueError(
-        f"Unsupported controller '{controller_name}'. Expected one of {get_supported_controller_names(include_placeholders=True)}."
+        f"Unsupported controller '{controller_name}'. Expected one of {get_supported_controller_names()}."
     )

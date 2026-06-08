@@ -41,7 +41,7 @@ def parse_args():
     parser.add_argument(
         "--controllers",
         nargs="+",
-        choices=get_supported_controller_names(include_placeholders=True),
+        choices=get_supported_controller_names(),
         default=list(DEFAULT_CONTROLLER_ORDER),
         help="Controllers to include in the comparison run.",
     )
@@ -195,12 +195,6 @@ def parse_args():
         help="Maximum number of waypoints to follow when building the route.",
     )
     parser.add_argument(
-        "--route-close-distance",
-        type=float,
-        default=8.0,
-        help="Legacy route-close threshold kept for compatibility with route generation helpers.",
-    )
-    parser.add_argument(
         "--route-length-tolerance",
         type=float,
         default=0.05,
@@ -240,12 +234,6 @@ def parse_args():
     parser.add_argument("--lqr-q-ey-dot", type=float, default=1.10, help="LQR lateral error derivative weight.")
     parser.add_argument("--lqr-q-epsi", type=float, default=6.0, help="LQR heading error weight.")
     parser.add_argument("--lqr-q-epsi-dot", type=float, default=2.6, help="LQR heading error derivative weight.")
-    parser.add_argument(
-        "--lqr-q-iey",
-        type=float,
-        default=0.0,
-        help="Deprecated legacy argument kept for compatibility.",
-    )
     parser.add_argument("--lqr-r", type=float, default=8.0, help="LQR steering effort weight.")
     parser.add_argument("--lqr-kp-long", type=float, default=0.6, help="LQR controller longitudinal P gain.")
     parser.add_argument("--lqr-ki-long", type=float, default=0.01, help="LQR controller longitudinal I gain.")
