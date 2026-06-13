@@ -6,8 +6,8 @@ import numpy as np
 @dataclass
 class SpeedPlannerConfig:
     base_target_speed_kmh: float
-    min_turn_speed_kmh: float = 38.0
-    max_lateral_accel: float = 16.0
+    min_turn_speed_kmh: float = 48.0
+    max_lateral_accel: float = 18.0
     max_accel: float = 3.5
     max_decel: float = 9.0
     curvature_epsilon: float = 1e-4
@@ -19,6 +19,9 @@ class SpeedPlannerConfig:
     lateral_error_rate_critical: float = 1.6
     heading_error_rate_warning_rad: float = np.radians(8.0)
     heading_error_rate_critical_rad: float = np.radians(16.0)
+    lateral_error_rate_activation: float = 0.8
+    heading_error_rate_activation_rad: float = np.radians(8.0)
+    error_rate_filter_alpha: float = 0.25
     recovery_hold_steps: int = 3
     entry_max_speed_kmh: float = 70.0
     entry_curvature_threshold: float = 0.015
@@ -36,6 +39,8 @@ class CurvatureSpeedPlanner:
         self._planned_speed_mps = None
         self._prev_lateral_error_m = None
         self._prev_heading_error_rad = None
+        self._filtered_lateral_error_rate = 0.0
+        self._filtered_heading_error_rate = 0.0
         self._hold_steps_remaining = 0
         self.last_risk = 0.0
         self.last_reason = "none"
@@ -50,6 +55,8 @@ class CurvatureSpeedPlanner:
         self._planned_speed_mps = None
         self._prev_lateral_error_m = None
         self._prev_heading_error_rad = None
+        self._filtered_lateral_error_rate = 0.0
+        self._filtered_heading_error_rate = 0.0
         self._hold_steps_remaining = 0
         self.last_risk = 0.0
         self.last_reason = "none"
@@ -126,6 +133,10 @@ class CurvatureSpeedPlanner:
             return 0.0
         return max((abs(current_value) - abs(previous_value)) / dt, 0.0)
 
+    def _filtered_error_rate(self, raw_rate, previous_filtered_rate):
+        alpha = float(np.clip(self.config.error_rate_filter_alpha, 0.0, 1.0))
+        return (1.0 - alpha) * previous_filtered_rate + alpha * raw_rate
+
     def plan_speed_mps(self, curvatures, dt, lateral_error_m=0.0, heading_error_rad=0.0):
         curvature_values = np.asarray(list(curvatures), dtype=float)
         if curvature_values.size == 0:
@@ -133,10 +144,28 @@ class CurvatureSpeedPlanner:
         else:
             max_abs_curvature = float(np.max(np.abs(curvature_values)))
 
-        lateral_error_rate = self._error_rate(lateral_error_m, self._prev_lateral_error_m, dt)
-        heading_error_rate = self._error_rate(heading_error_rad, self._prev_heading_error_rad, dt)
+        raw_lateral_error_rate = self._error_rate(lateral_error_m, self._prev_lateral_error_m, dt)
+        raw_heading_error_rate = self._error_rate(heading_error_rad, self._prev_heading_error_rad, dt)
+        self._filtered_lateral_error_rate = self._filtered_error_rate(
+            raw_lateral_error_rate,
+            self._filtered_lateral_error_rate,
+        )
+        self._filtered_heading_error_rate = self._filtered_error_rate(
+            raw_heading_error_rate,
+            self._filtered_heading_error_rate,
+        )
         self._prev_lateral_error_m = lateral_error_m
         self._prev_heading_error_rad = heading_error_rad
+        lateral_error_rate = (
+            self._filtered_lateral_error_rate
+            if abs(lateral_error_m) >= self.config.lateral_error_rate_activation
+            else 0.0
+        )
+        heading_error_rate = (
+            self._filtered_heading_error_rate
+            if abs(heading_error_rad) >= self.config.heading_error_rate_activation_rad
+            else 0.0
+        )
 
         curvature_risk, curvature_target, curvature_reason = self._raw_target_for_curvature(max_abs_curvature)
         risk_candidates = [

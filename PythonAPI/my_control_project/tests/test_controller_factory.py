@@ -4,6 +4,8 @@ import types
 import unittest
 from types import SimpleNamespace
 
+import numpy as np
+
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PYTHONAPI_ROOT = os.path.dirname(PROJECT_ROOT)
@@ -45,7 +47,17 @@ def build_args(**overrides):
         "lqr_ki_long": 0.01,
         "lqr_kd_long": 0.06,
         "lqr_max_steer": 0.55,
-        "lqr_max_steer_rate": 0.18,
+        "lqr_max_steer_rate": 0.16,
+        "lqr_curvature_alpha": 0.50,
+        "lqr_feedforward_gain": 1.0,
+        "lqr_turn_in_rate_scale": 0.70,
+        "lqr_turn_in_guard_lateral_error": 1.0,
+        "lqr_turn_in_guard_heading_error": 10.0,
+        "lqr_turn_in_guard_max_curvature": 0.04,
+        "lqr_inside_error_feedforward_start": 0.80,
+        "lqr_inside_error_feedforward_full": 1.80,
+        "lqr_inside_error_feedforward_min_scale": 0.65,
+        "lqr_inside_error_feedforward_heading_limit": 4.0,
         "pid_lat_kp": 0.72,
         "pid_lat_ki": 0.005,
         "pid_lat_kd": 0.38,
@@ -90,6 +102,25 @@ class ControllerFactoryTest(unittest.TestCase):
         self.assertEqual(controller._longitudinal_controller.kp, 0.31)
         self.assertEqual(controller._longitudinal_controller.ki, 0.02)
         self.assertEqual(controller._longitudinal_controller.kd, 0.09)
+
+    def test_lqr_inside_curve_feedforward_params_can_be_overridden(self):
+        controller = create_tracking_controller(
+            "lqr",
+            FakeVehicle(),
+            build_args(
+                lqr_inside_error_feedforward_start=0.25,
+                lqr_inside_error_feedforward_full=0.8,
+                lqr_inside_error_feedforward_min_scale=0.4,
+                lqr_inside_error_feedforward_heading_limit=12.0,
+                lqr_turn_in_guard_max_curvature=0.06,
+            ),
+        )
+
+        self.assertEqual(controller.inside_error_feedforward_start, 0.25)
+        self.assertEqual(controller.inside_error_feedforward_full, 0.8)
+        self.assertEqual(controller.inside_error_feedforward_min_scale, 0.4)
+        self.assertAlmostEqual(controller.inside_error_feedforward_heading_limit, np.radians(12.0))
+        self.assertEqual(controller.turn_in_guard_max_curvature, 0.06)
 
 
 if __name__ == "__main__":

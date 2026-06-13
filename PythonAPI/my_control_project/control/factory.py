@@ -1,3 +1,5 @@
+import numpy as np
+
 from .lqr_controller import LqrController
 from .longitudinal import PidLongitudinalController
 from .mpc_controller import MpcController
@@ -36,8 +38,18 @@ def create_tracking_controller(controller_name, vehicle, args):
             max_steer=args.lqr_max_steer,
             max_steer_rate=args.lqr_max_steer_rate,
             derivative_alpha=get_arg(args, "lqr_derivative_alpha", 0.20),
-            curvature_alpha=get_arg(args, "lqr_curvature_alpha", 0.55),
-            feedforward_gain=get_arg(args, "lqr_feedforward_gain", 1.12),
+            curvature_alpha=get_arg(args, "lqr_curvature_alpha", 0.50),
+            feedforward_gain=get_arg(args, "lqr_feedforward_gain", 1.0),
+            turn_in_rate_scale=get_arg(args, "lqr_turn_in_rate_scale", 0.70),
+            turn_in_guard_lateral_error=get_arg(args, "lqr_turn_in_guard_lateral_error", 1.0),
+            turn_in_guard_heading_error=np.radians(get_arg(args, "lqr_turn_in_guard_heading_error", 10.0)),
+            turn_in_guard_max_curvature=get_arg(args, "lqr_turn_in_guard_max_curvature", 0.04),
+            inside_error_feedforward_start=get_arg(args, "lqr_inside_error_feedforward_start", 0.80),
+            inside_error_feedforward_full=get_arg(args, "lqr_inside_error_feedforward_full", 1.80),
+            inside_error_feedforward_min_scale=get_arg(args, "lqr_inside_error_feedforward_min_scale", 0.65),
+            inside_error_feedforward_heading_limit=np.radians(
+                get_arg(args, "lqr_inside_error_feedforward_heading_limit", 4.0)
+            ),
             longitudinal_controller=create_pid_longitudinal_controller(
                 args.target_speed,
                 args.lqr_kp_long,
@@ -75,12 +87,12 @@ def create_tracking_controller(controller_name, vehicle, args):
     if controller_name == "mpc":
         return MpcController(
             target_speed=args.target_speed,
-            horizon=get_arg(args, "mpc_horizon", 12),
+            horizon=get_arg(args, "mpc_horizon", 16),
             dt=0.05,
-            q_y=get_arg(args, "mpc_q_y", 10.0),
-            q_psi=get_arg(args, "mpc_q_psi", 14.0),
-            r_steer=get_arg(args, "mpc_r_steer", 0.9),
-            r_steer_rate=get_arg(args, "mpc_r_steer_rate", 1.2),
+            q_y=get_arg(args, "mpc_q_y", 12.0),
+            q_psi=get_arg(args, "mpc_q_psi", 18.0),
+            r_steer=get_arg(args, "mpc_r_steer", 0.8),
+            r_steer_rate=get_arg(args, "mpc_r_steer_rate", 0.9),
             kp_long=get_arg(args, "mpc_kp_long", 0.6),
             ki_long=get_arg(args, "mpc_ki_long", 0.01),
             kd_long=get_arg(args, "mpc_kd_long", 0.06),

@@ -24,15 +24,28 @@ class SimpleHUD:
         self.font = pygame.font.Font(None, 28)
         self.info_text = []
 
-    def update(self, vehicle, control, controller_name):
+    def update(
+        self,
+        vehicle,
+        control,
+        controller_name,
+        target_speed_mps=None,
+        speed_planner_mode=None,
+    ):
         vel = vehicle.get_velocity()
         speed = 3.6 * np.sqrt(vel.x ** 2 + vel.y ** 2 + vel.z ** 2)
         transform = vehicle.get_transform()
         location = transform.location
+        target_speed_kmh = 3.6 * target_speed_mps if target_speed_mps is not None else None
+        speed_error_kmh = speed - target_speed_kmh if target_speed_kmh is not None else None
+        mode_label = speed_planner_mode or "unknown"
 
         self.info_text = [
             f"Controller: {controller_name.upper()}",
             f"Speed: {speed:5.1f} km/h",
+            f"Target Speed: {target_speed_kmh:5.1f} km/h" if target_speed_kmh is not None else "Target Speed: n/a",
+            f"Speed Error: {speed_error_kmh:+5.1f} km/h" if speed_error_kmh is not None else "Speed Error: n/a",
+            f"Speed Mode: {mode_label}",
             f"Steer: {control.steer:+.2f}",
             f"Throttle: {control.throttle:.2f}",
             f"Brake: {control.brake:.2f}",
@@ -79,13 +92,31 @@ def route_curvature(route_trace, route_index):
     return float(np.clip(curvature, -0.2, 0.2))
 
 
-def build_curvature_preview(route_trace, reference_index, preview_steps=(0, 5, 10, 15, 25, 35, 50), curvature_fn=route_curvature):
+def build_curvature_preview(route_trace, reference_index, preview_steps=(0, 5, 10, 15), curvature_fn=route_curvature):
     curvatures = []
     last_index = max(0, len(route_trace) - 2)
     for step in preview_steps:
         preview_index = min(max(0, reference_index + step), last_index)
         curvatures.append(curvature_fn(route_trace, preview_index))
     return curvatures
+
+
+def build_controller_curvature_preview(
+    route_trace,
+    reference_index,
+    speed_mps,
+    horizon,
+    dt,
+    curvature_fn=route_curvature,
+):
+    distance_per_step_m = max(float(speed_mps) * float(dt), 1.0)
+    preview_steps = [int(round(step * distance_per_step_m)) for step in range(max(int(horizon), 1))]
+    return build_curvature_preview(
+        route_trace,
+        reference_index,
+        preview_steps=preview_steps,
+        curvature_fn=curvature_fn,
+    )
 
 
 def build_speed_planner(args):
@@ -104,6 +135,9 @@ def build_speed_planner(args):
             lateral_error_rate_critical=args.speed_planner_lateral_error_rate_critical,
             heading_error_rate_warning_rad=np.radians(args.speed_planner_heading_error_rate_warning),
             heading_error_rate_critical_rad=np.radians(args.speed_planner_heading_error_rate_critical),
+            lateral_error_rate_activation=args.speed_planner_lateral_error_rate_activation,
+            heading_error_rate_activation_rad=np.radians(args.speed_planner_heading_error_rate_activation),
+            error_rate_filter_alpha=args.speed_planner_error_rate_alpha,
             recovery_hold_steps=args.speed_planner_recovery_hold_steps,
             entry_max_speed_kmh=args.speed_planner_entry_max_speed,
             entry_curvature_threshold=args.speed_planner_entry_curvature_threshold,
@@ -140,7 +174,17 @@ def drain_latest_image(image_queue):
     return latest_image
 
 
-def render_frame(display, image_queue, hud, vehicle, control, controller_name, clock):
+def render_frame(
+    display,
+    image_queue,
+    hud,
+    vehicle,
+    control,
+    controller_name,
+    clock,
+    target_speed_mps=None,
+    speed_planner_mode=None,
+):
     latest_image = drain_latest_image(image_queue)
     if latest_image is not None:
         surface = pygame.surfarray.make_surface(latest_image.swapaxes(0, 1))
@@ -148,7 +192,13 @@ def render_frame(display, image_queue, hud, vehicle, control, controller_name, c
     else:
         display.fill((0, 0, 0))
 
-    hud.update(vehicle, control, controller_name)
+    hud.update(
+        vehicle,
+        control,
+        controller_name,
+        target_speed_mps=target_speed_mps,
+        speed_planner_mode=speed_planner_mode,
+    )
     hud.render(display)
     pygame.display.flip()
     clock.tick_busy_loop(60)
@@ -236,6 +286,16 @@ def apply_controller_step(
 ):
     curvature_index = reference_index if reference_index is not None else target_index
     curvature = route_curvature(route_trace, curvature_index)
+    if getattr(controller, "supports_curvature_sequence", False):
+        velocity = vehicle.get_velocity()
+        speed_mps = np.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2)
+        curvature = build_controller_curvature_preview(
+            route_trace,
+            curvature_index,
+            speed_mps=speed_mps,
+            horizon=getattr(controller, "horizon", 1),
+            dt=getattr(controller, "dt", 0.05),
+        )
     return controller.run_step(
         vehicle,
         target_waypoint,
@@ -331,7 +391,7 @@ def run_controller_lap(controller_name, world, blueprint_library, vehicle_bp, sp
             if args.speed_planner_mode == "off":
                 target_speed_ms = args.target_speed / 3.6
                 runtime["speed_planner"].last_risk = 0.0
-                runtime["speed_planner"].last_reason = "none"
+                runtime["speed_planner"].last_reason = "fixed_throttle_brake"
             else:
                 curvature_preview = build_curvature_preview(route_trace, closest_route_index)
                 target_speed_ms = runtime["speed_planner"].plan_speed_mps(
@@ -376,7 +436,17 @@ def run_controller_lap(controller_name, world, blueprint_library, vehicle_bp, sp
                 control,
                 sim_time,
             )
-            render_frame(display, image_queue, hud, vehicle, control, controller_name, clock)
+            render_frame(
+                display,
+                image_queue,
+                hud,
+                vehicle,
+                control,
+                controller_name,
+                clock,
+                target_speed_mps=target_speed_ms,
+                speed_planner_mode=args.speed_planner_mode,
+            )
             log_step(controller_name, route_trace, route_index, snapshot, control)
 
             if zero_speed_terminator.update(snapshot["speed"], sim_time, collision_count[0]):

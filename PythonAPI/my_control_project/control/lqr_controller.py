@@ -20,10 +20,18 @@ class LqrController(BaseTrackingController):
         ki_long=0.01,
         kd_long=0.06,
         max_steer=0.55,
-        max_steer_rate=0.18,
+        max_steer_rate=0.16,
         derivative_alpha=0.20,
-        curvature_alpha=0.55,
-        feedforward_gain=1.12,
+        curvature_alpha=0.50,
+        feedforward_gain=1.0,
+        turn_in_rate_scale=0.70,
+        turn_in_guard_lateral_error=1.0,
+        turn_in_guard_heading_error=np.radians(10.0),
+        turn_in_guard_max_curvature=0.04,
+        inside_error_feedforward_start=0.80,
+        inside_error_feedforward_full=1.80,
+        inside_error_feedforward_min_scale=0.65,
+        inside_error_feedforward_heading_limit=np.radians(4.0),
         longitudinal_controller=None,
     ):
         print(">>> USING VEHICLE-GRADE LQR (DYNAMIC BICYCLE MODEL) <<<")
@@ -44,6 +52,14 @@ class LqrController(BaseTrackingController):
         self.derivative_alpha = derivative_alpha
         self.curvature_alpha = curvature_alpha
         self.feedforward_gain = feedforward_gain
+        self.turn_in_rate_scale = turn_in_rate_scale
+        self.turn_in_guard_lateral_error = turn_in_guard_lateral_error
+        self.turn_in_guard_heading_error = turn_in_guard_heading_error
+        self.turn_in_guard_max_curvature = turn_in_guard_max_curvature
+        self.inside_error_feedforward_start = inside_error_feedforward_start
+        self.inside_error_feedforward_full = inside_error_feedforward_full
+        self.inside_error_feedforward_min_scale = inside_error_feedforward_min_scale
+        self.inside_error_feedforward_heading_limit = inside_error_feedforward_heading_limit
         self._longitudinal_controller = longitudinal_controller or PidLongitudinalController(
             target_speed_kmh=target_speed,
             kp=kp_long,
@@ -117,6 +133,34 @@ class LqrController(BaseTrackingController):
 
         return e_y_dot, e_psi_dot
 
+    def _steer_rate_limit(self, steer_change, e_y, e_psi, curvature):
+        rate_limit = self.max_steer_rate
+        adding_turn_in = abs(curvature) > 1e-4 and steer_change * curvature > 0.0
+        near_centerline = (
+            abs(e_y) <= self.turn_in_guard_lateral_error
+            and abs(e_psi) <= self.turn_in_guard_heading_error
+        )
+        guard_curvature = max(float(self.turn_in_guard_max_curvature), 0.0)
+        moderate_curve = abs(curvature) <= guard_curvature
+        if adding_turn_in and near_centerline and moderate_curve:
+            rate_limit *= float(np.clip(self.turn_in_rate_scale, 0.0, 1.0))
+        return max(rate_limit, 1e-6)
+
+    def _curvature_feedforward_scale(self, e_y, e_psi, curvature):
+        if abs(curvature) <= 1e-4 or e_y * curvature <= 0.0:
+            return 1.0
+        if abs(e_psi) > self.inside_error_feedforward_heading_limit:
+            return 1.0
+
+        start = max(float(self.inside_error_feedforward_start), 0.0)
+        full = max(float(self.inside_error_feedforward_full), start + 1e-6)
+        min_scale = float(np.clip(self.inside_error_feedforward_min_scale, 0.0, 1.0))
+        if abs(e_y) <= start:
+            return 1.0
+
+        progress = np.clip((abs(e_y) - start) / (full - start), 0.0, 1.0)
+        return 1.0 - progress * (1.0 - min_scale)
+
     def run_step(
         self,
         vehicle,
@@ -160,7 +204,12 @@ class LqrController(BaseTrackingController):
         self._filtered_curvature = (
             (1.0 - curvature_alpha) * self._filtered_curvature + curvature_alpha * curvature
         )
-        steer_ff = self.feedforward_gain * np.arctan(self.L * self._filtered_curvature)
+        feedforward_scale = self._curvature_feedforward_scale(e_y, e_psi, self._filtered_curvature)
+        steer_ff = (
+            self.feedforward_gain
+            * feedforward_scale
+            * np.arctan(self.L * self._filtered_curvature)
+        )
 
         self._update_lqr_gain(speed_mps)
         state = np.array([e_y, e_y_dot, e_psi, e_psi_dot])
@@ -168,7 +217,9 @@ class LqrController(BaseTrackingController):
         steer = steer_ff + steer_fb
 
         steer = np.clip(steer, -self.max_steer, self.max_steer)
-        steer_change = np.clip(steer - self._prev_steer, -self.max_steer_rate, self.max_steer_rate)
+        raw_steer_change = steer - self._prev_steer
+        steer_rate_limit = self._steer_rate_limit(raw_steer_change, e_y, e_psi, curvature)
+        steer_change = np.clip(raw_steer_change, -steer_rate_limit, steer_rate_limit)
         steer = self._prev_steer + steer_change
         self._prev_steer = steer
 

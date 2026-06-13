@@ -65,6 +65,18 @@ def build_controller_args(**overrides):
 
 
 class ResearchMpcControllerTest(unittest.TestCase):
+    def test_default_params_use_high_speed_preview_tuning(self):
+        controller = MpcController()
+
+        self.assertTrue(controller.supports_curvature_sequence)
+        self.assertEqual(controller.horizon, 16)
+        self.assertEqual(controller.q_y, 12.0)
+        self.assertEqual(controller.q_psi, 18.0)
+        self.assertEqual(controller.r_steer, 0.8)
+        self.assertEqual(controller.r_steer_rate, 0.9)
+        self.assertEqual(controller.max_steer, 0.65)
+        self.assertEqual(controller.max_steer_rate, 0.30)
+
     def test_zero_error_constant_curve_tracks_reference_steer(self):
         controller = MpcController(
             horizon=5,

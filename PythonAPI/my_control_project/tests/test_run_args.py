@@ -63,9 +63,31 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.lqr_q_epsi_dot, 2.6)
         self.assertEqual(args.lqr_r, 8.0)
         self.assertEqual(args.lqr_max_steer, 0.55)
-        self.assertEqual(args.lqr_max_steer_rate, 0.18)
-        self.assertEqual(args.lqr_curvature_alpha, 0.55)
-        self.assertEqual(args.lqr_feedforward_gain, 1.12)
+        self.assertEqual(args.lqr_max_steer_rate, 0.16)
+        self.assertEqual(args.lqr_curvature_alpha, 0.50)
+        self.assertEqual(args.lqr_feedforward_gain, 1.0)
+        self.assertEqual(args.lqr_turn_in_rate_scale, 0.70)
+        self.assertEqual(args.lqr_turn_in_guard_lateral_error, 1.0)
+        self.assertEqual(args.lqr_turn_in_guard_heading_error, 10.0)
+        self.assertEqual(args.lqr_turn_in_guard_max_curvature, 0.04)
+        self.assertEqual(args.lqr_inside_error_feedforward_start, 0.80)
+        self.assertEqual(args.lqr_inside_error_feedforward_full, 1.80)
+        self.assertEqual(args.lqr_inside_error_feedforward_min_scale, 0.65)
+        self.assertEqual(args.lqr_inside_error_feedforward_heading_limit, 4.0)
+
+    def test_mpc_cli_defaults_use_longer_high_speed_preview(self):
+        run_my_control = importlib.import_module("run_my_control")
+
+        with mock.patch.object(sys, "argv", ["run_my_control.py"]):
+            args = run_my_control.parse_args()
+
+        self.assertEqual(args.mpc_horizon, 16)
+        self.assertEqual(args.mpc_q_y, 12.0)
+        self.assertEqual(args.mpc_q_psi, 18.0)
+        self.assertEqual(args.mpc_r_steer, 0.8)
+        self.assertEqual(args.mpc_r_steer_rate, 0.9)
+        self.assertEqual(args.mpc_max_steer, 0.65)
+        self.assertEqual(args.mpc_max_steer_rate, 0.30)
 
     def test_speed_planner_cli_defaults_enable_curvature_based_dynamic_speed(self):
         run_my_control = importlib.import_module("run_my_control")
@@ -73,8 +95,8 @@ class RunArgsTest(unittest.TestCase):
         with mock.patch.object(sys, "argv", ["run_my_control.py"]):
             args = run_my_control.parse_args()
 
-        self.assertEqual(args.speed_planner_min_turn_speed, 38.0)
-        self.assertEqual(args.speed_planner_max_lateral_accel, 16.0)
+        self.assertEqual(args.speed_planner_min_turn_speed, 48.0)
+        self.assertEqual(args.speed_planner_max_lateral_accel, 18.0)
         self.assertEqual(args.speed_planner_max_accel, 3.5)
         self.assertEqual(args.speed_planner_max_decel, 9.0)
         self.assertEqual(args.speed_planner_lateral_error_warning, 1.6)
@@ -85,6 +107,9 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.speed_planner_lateral_error_rate_critical, 1.6)
         self.assertEqual(args.speed_planner_heading_error_rate_warning, 8.0)
         self.assertEqual(args.speed_planner_heading_error_rate_critical, 16.0)
+        self.assertEqual(args.speed_planner_lateral_error_rate_activation, 0.8)
+        self.assertEqual(args.speed_planner_heading_error_rate_activation, 8.0)
+        self.assertEqual(args.speed_planner_error_rate_alpha, 0.25)
         self.assertEqual(args.speed_planner_recovery_hold_steps, 3)
         self.assertEqual(args.speed_planner_entry_max_speed, 70.0)
         self.assertEqual(args.speed_planner_entry_curvature_threshold, 0.015)

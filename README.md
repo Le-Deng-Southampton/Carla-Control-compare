@@ -36,7 +36,11 @@ Start the desktop launcher from the repository root:
 
 The launcher runs `Launch-CARLA-Project.ps1`, starts CARLA if port `2000` is
 not already available, waits for the simulator server, and then runs the
-controller-comparison script.
+controller-comparison script. If you do not pass `--speed-planner-mode`, the
+desktop launcher asks whether to run pure fixed-speed controller comparison or
+high-speed adaptive real-situation simulation. The pure comparison choice adds
+`--speed-planner-mode off --target-speed 70`; the high-speed simulation choice
+adds `--speed-planner-mode adaptive --target-speed 120`.
 
 Run the project script directly:
 

@@ -77,13 +77,13 @@ def parse_args():
     parser.add_argument(
         "--speed-planner-min-turn-speed",
         type=float,
-        default=38.0,
+        default=48.0,
         help="Minimum planned speed in km/h for tight turns.",
     )
     parser.add_argument(
         "--speed-planner-max-lateral-accel",
         type=float,
-        default=16.0,
+        default=18.0,
         help="Maximum lateral acceleration in m/s^2 used by curvature speed planning.",
     )
     parser.add_argument(
@@ -145,6 +145,24 @@ def parse_args():
         type=float,
         default=16.0,
         help="Heading error growth rate in deg/s where protective speed reduction reaches its minimum.",
+    )
+    parser.add_argument(
+        "--speed-planner-lateral-error-rate-activation",
+        type=float,
+        default=0.8,
+        help="Minimum lateral error in meters before lateral-error-rate slowdown can trigger.",
+    )
+    parser.add_argument(
+        "--speed-planner-heading-error-rate-activation",
+        type=float,
+        default=8.0,
+        help="Minimum heading error in degrees before heading-error-rate slowdown can trigger.",
+    )
+    parser.add_argument(
+        "--speed-planner-error-rate-alpha",
+        type=float,
+        default=0.25,
+        help="Low-pass blend factor for speed-planner tracking-error growth rates.",
     )
     parser.add_argument(
         "--speed-planner-recovery-hold-steps",
@@ -242,7 +260,7 @@ def parse_args():
     parser.add_argument(
         "--lqr-max-steer-rate",
         type=float,
-        default=0.18,
+        default=0.16,
         help="Maximum LQR steering change per control step.",
     )
     parser.add_argument(
@@ -254,20 +272,68 @@ def parse_args():
     parser.add_argument(
         "--lqr-curvature-alpha",
         type=float,
-        default=0.55,
+        default=0.50,
         help="Low-pass blend factor for LQR curvature feedforward.",
     )
     parser.add_argument(
         "--lqr-feedforward-gain",
         type=float,
-        default=1.12,
+        default=1.0,
         help="Gain applied to LQR bicycle-model curvature feedforward.",
     )
-    parser.add_argument("--mpc-horizon", type=int, default=12, help="MPC prediction horizon in control steps.")
-    parser.add_argument("--mpc-q-y", type=float, default=10.0, help="MPC lateral error weight.")
-    parser.add_argument("--mpc-q-psi", type=float, default=14.0, help="MPC heading error weight.")
-    parser.add_argument("--mpc-r-steer", type=float, default=0.9, help="MPC steering effort weight.")
-    parser.add_argument("--mpc-r-steer-rate", type=float, default=1.2, help="MPC steering-rate effort weight.")
+    parser.add_argument(
+        "--lqr-turn-in-rate-scale",
+        type=float,
+        default=0.70,
+        help="Scale applied to LQR steering-rate limit while adding turn-in near the lane centerline.",
+    )
+    parser.add_argument(
+        "--lqr-turn-in-guard-lateral-error",
+        type=float,
+        default=1.0,
+        help="Maximum lateral error in meters where LQR turn-in rate guarding is active.",
+    )
+    parser.add_argument(
+        "--lqr-turn-in-guard-heading-error",
+        type=float,
+        default=10.0,
+        help="Maximum heading error in degrees where LQR turn-in rate guarding is active.",
+    )
+    parser.add_argument(
+        "--lqr-turn-in-guard-max-curvature",
+        type=float,
+        default=0.04,
+        help="Maximum route curvature where LQR near-centerline turn-in rate guarding is active.",
+    )
+    parser.add_argument(
+        "--lqr-inside-error-feedforward-start",
+        type=float,
+        default=0.80,
+        help="Inside-curve lateral error in meters where LQR curvature feedforward attenuation starts.",
+    )
+    parser.add_argument(
+        "--lqr-inside-error-feedforward-full",
+        type=float,
+        default=1.80,
+        help="Inside-curve lateral error in meters where LQR curvature feedforward reaches its minimum scale.",
+    )
+    parser.add_argument(
+        "--lqr-inside-error-feedforward-min-scale",
+        type=float,
+        default=0.65,
+        help="Minimum LQR curvature feedforward scale when the vehicle is already inside the curve.",
+    )
+    parser.add_argument(
+        "--lqr-inside-error-feedforward-heading-limit",
+        type=float,
+        default=4.0,
+        help="Maximum heading error in degrees where inside-curve LQR feedforward attenuation is allowed.",
+    )
+    parser.add_argument("--mpc-horizon", type=int, default=16, help="MPC prediction horizon in control steps.")
+    parser.add_argument("--mpc-q-y", type=float, default=12.0, help="MPC lateral error weight.")
+    parser.add_argument("--mpc-q-psi", type=float, default=18.0, help="MPC heading error weight.")
+    parser.add_argument("--mpc-r-steer", type=float, default=0.8, help="MPC steering effort weight.")
+    parser.add_argument("--mpc-r-steer-rate", type=float, default=0.9, help="MPC steering-rate effort weight.")
     parser.add_argument("--mpc-kp-long", type=float, default=0.6, help="MPC controller longitudinal P gain.")
     parser.add_argument("--mpc-ki-long", type=float, default=0.01, help="MPC controller longitudinal I gain.")
     parser.add_argument("--mpc-kd-long", type=float, default=0.06, help="MPC controller longitudinal D gain.")
@@ -355,6 +421,9 @@ def build_run_config(args, controller_order, spawn_index, destination_index, des
             "lateral_error_rate_critical": args.speed_planner_lateral_error_rate_critical,
             "heading_error_rate_warning_deg": args.speed_planner_heading_error_rate_warning,
             "heading_error_rate_critical_deg": args.speed_planner_heading_error_rate_critical,
+            "lateral_error_rate_activation": args.speed_planner_lateral_error_rate_activation,
+            "heading_error_rate_activation_deg": args.speed_planner_heading_error_rate_activation,
+            "error_rate_filter_alpha": args.speed_planner_error_rate_alpha,
             "recovery_hold_steps": args.speed_planner_recovery_hold_steps,
             "entry_max_speed_kmh": args.speed_planner_entry_max_speed,
             "entry_curvature_threshold": args.speed_planner_entry_curvature_threshold,
@@ -371,6 +440,14 @@ def build_run_config(args, controller_order, spawn_index, destination_index, des
             "derivative_alpha": args.lqr_derivative_alpha,
             "curvature_alpha": args.lqr_curvature_alpha,
             "feedforward_gain": args.lqr_feedforward_gain,
+            "turn_in_rate_scale": args.lqr_turn_in_rate_scale,
+            "turn_in_guard_lateral_error": args.lqr_turn_in_guard_lateral_error,
+            "turn_in_guard_heading_error_deg": args.lqr_turn_in_guard_heading_error,
+            "turn_in_guard_max_curvature": args.lqr_turn_in_guard_max_curvature,
+            "inside_error_feedforward_start": args.lqr_inside_error_feedforward_start,
+            "inside_error_feedforward_full": args.lqr_inside_error_feedforward_full,
+            "inside_error_feedforward_min_scale": args.lqr_inside_error_feedforward_min_scale,
+            "inside_error_feedforward_heading_limit_deg": args.lqr_inside_error_feedforward_heading_limit,
         },
         "mpc": {
             "horizon": args.mpc_horizon,

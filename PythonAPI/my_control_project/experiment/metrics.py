@@ -18,6 +18,7 @@ EXPERIMENT_METADATA_HEADER = [
 
 SPEED_PLAN_REASONS = [
     "none",
+    "fixed_throttle_brake",
     "entry_curvature",
     "curvature",
     "lateral_error",
@@ -106,6 +107,14 @@ def build_summary(controller_name, spawn_index, route_trace, args, metrics, rout
         args.lqr_derivative_alpha,
         args.lqr_curvature_alpha,
         args.lqr_feedforward_gain,
+        args.lqr_turn_in_rate_scale,
+        args.lqr_turn_in_guard_lateral_error,
+        args.lqr_turn_in_guard_heading_error,
+        args.lqr_turn_in_guard_max_curvature,
+        args.lqr_inside_error_feedforward_start,
+        args.lqr_inside_error_feedforward_full,
+        args.lqr_inside_error_feedforward_min_scale,
+        args.lqr_inside_error_feedforward_heading_limit,
         args.mpc_horizon,
         args.mpc_q_y,
         args.mpc_q_psi,

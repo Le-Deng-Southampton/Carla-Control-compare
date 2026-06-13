@@ -9,20 +9,22 @@ from road_planning.tracking_geometry import compute_path_tracking_errors
 class MpcController(BaseTrackingController):
     """Linear MPC lateral controller with explicit curvature preview."""
 
+    supports_curvature_sequence = True
+
     def __init__(
         self,
         target_speed=30.0,
-        horizon=8,
+        horizon=16,
         dt=0.05,
-        q_y=6.0,
-        q_psi=8.0,
-        r_steer=1.5,
-        r_steer_rate=4.0,
+        q_y=12.0,
+        q_psi=18.0,
+        r_steer=0.8,
+        r_steer_rate=0.9,
         kp_long=0.6,
         ki_long=0.01,
         kd_long=0.06,
-        max_steer=0.6,
-        max_steer_rate=0.20,
+        max_steer=0.65,
+        max_steer_rate=0.30,
         longitudinal_controller=None,
     ):
         self.Lf = 1.45
