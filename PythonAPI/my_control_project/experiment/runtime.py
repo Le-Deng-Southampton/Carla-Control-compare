@@ -6,8 +6,11 @@ import pygame
 
 from control import create_tracking_controller
 from error_providers import create_error_provider
+from project_config import CONTROLLER_SPEED_LIMIT_PROFILES, CONTROL_DT, arg_value
+from road_planning.frenet_planner import FrenetPlannerConfig, plan_frenet_reference
+from road_planning.reference_path import ReferencePathConfig, build_legacy_reference_trajectory
 from road_planning.route_planner import build_shaped_route
-from Speed_Planing import CurvatureSpeedPlanner, SpeedPlannerConfig
+from speed_planning import CurvatureSpeedPlanner, SpeedPlannerConfig
 
 from .logging import append_step_data, build_step_snapshot, log_step
 from .metrics import create_metrics
@@ -109,7 +112,11 @@ def build_controller_curvature_preview(
     dt,
     curvature_fn=route_curvature,
 ):
-    distance_per_step_m = max(float(speed_mps) * float(dt), 1.0)
+    current_abs_curvature = abs(curvature_fn(route_trace, reference_index))
+    curve_spacing_scale = 1.0
+    if current_abs_curvature > 0.04:
+        curve_spacing_scale = float(np.clip(0.04 / current_abs_curvature, 0.45, 1.0))
+    distance_per_step_m = max(float(speed_mps) * float(dt) * curve_spacing_scale, 1.0)
     preview_steps = [int(round(step * distance_per_step_m)) for step in range(max(int(horizon), 1))]
     return build_curvature_preview(
         route_trace,
@@ -119,29 +126,70 @@ def build_controller_curvature_preview(
     )
 
 
-def build_speed_planner(args):
+def build_speed_planner_curvature_preview(
+    route_trace,
+    reference_index,
+    speed_mps,
+    preview_time_step=0.80,
+    min_preview_spacing_m=7.0,
+    preview_count=6,
+    curvature_fn=route_curvature,
+):
+    spacing_m = max(float(speed_mps) * float(preview_time_step), float(min_preview_spacing_m))
+    preview_steps = [int(round(step * spacing_m)) for step in range(max(int(preview_count), 1))]
+    return build_curvature_preview(
+        route_trace,
+        reference_index,
+        preview_steps=preview_steps,
+        curvature_fn=curvature_fn,
+    )
+
+
+def _scaled(value, profile, key):
+    return value * profile.get(key, 1.0)
+
+
+def _resolve_speed_limit_profile(controller_name, args):
+    if arg_value(args, "speed_planner_limit_profile") != "controller":
+        return None
+    return CONTROLLER_SPEED_LIMIT_PROFILES.get(controller_name)
+
+
+def build_speed_planner(args, controller_name=None):
+    profile = _resolve_speed_limit_profile(controller_name, args) or {}
+
+    def scaled_arg(name, scale_key):
+        return _scaled(arg_value(args, name), profile, scale_key)
+
+    def scaled_deg_arg(name, scale_key):
+        return np.radians(scaled_arg(name, scale_key))
+
     return CurvatureSpeedPlanner(
         SpeedPlannerConfig(
-            base_target_speed_kmh=args.target_speed,
-            min_turn_speed_kmh=args.speed_planner_min_turn_speed,
-            max_lateral_accel=args.speed_planner_max_lateral_accel,
-            max_accel=args.speed_planner_max_accel,
-            max_decel=args.speed_planner_max_decel,
-            lateral_error_warning=args.speed_planner_lateral_error_warning,
-            lateral_error_critical=args.speed_planner_lateral_error_critical,
-            heading_error_warning_rad=np.radians(args.speed_planner_heading_error_warning),
-            heading_error_critical_rad=np.radians(args.speed_planner_heading_error_critical),
-            lateral_error_rate_warning=args.speed_planner_lateral_error_rate_warning,
-            lateral_error_rate_critical=args.speed_planner_lateral_error_rate_critical,
-            heading_error_rate_warning_rad=np.radians(args.speed_planner_heading_error_rate_warning),
-            heading_error_rate_critical_rad=np.radians(args.speed_planner_heading_error_rate_critical),
-            lateral_error_rate_activation=args.speed_planner_lateral_error_rate_activation,
-            heading_error_rate_activation_rad=np.radians(args.speed_planner_heading_error_rate_activation),
-            error_rate_filter_alpha=args.speed_planner_error_rate_alpha,
-            recovery_hold_steps=args.speed_planner_recovery_hold_steps,
-            entry_max_speed_kmh=args.speed_planner_entry_max_speed,
-            entry_curvature_threshold=args.speed_planner_entry_curvature_threshold,
-            entry_full_cap_curvature=args.speed_planner_entry_full_cap_curvature,
+            base_target_speed_kmh=arg_value(args, "target_speed"),
+            min_turn_speed_kmh=scaled_arg("speed_planner_min_turn_speed", "min_turn_speed_scale"),
+            recovery_min_speed_kmh=scaled_arg("speed_planner_recovery_min_speed", "recovery_min_speed_scale"),
+            max_lateral_accel=scaled_arg("speed_planner_max_lateral_accel", "max_lateral_accel_scale"),
+            max_accel=arg_value(args, "speed_planner_max_accel"),
+            max_decel=arg_value(args, "speed_planner_max_decel"),
+            lateral_error_warning=scaled_arg("speed_planner_lateral_error_warning", "lateral_error_scale"),
+            lateral_error_critical=scaled_arg("speed_planner_lateral_error_critical", "lateral_error_scale"),
+            heading_error_warning_rad=scaled_deg_arg("speed_planner_heading_error_warning", "heading_error_scale"),
+            heading_error_critical_rad=scaled_deg_arg("speed_planner_heading_error_critical", "heading_error_scale"),
+            lateral_error_rate_warning=scaled_arg("speed_planner_lateral_error_rate_warning", "lateral_error_rate_scale"),
+            lateral_error_rate_critical=scaled_arg("speed_planner_lateral_error_rate_critical", "lateral_error_rate_scale"),
+            heading_error_rate_warning_rad=scaled_deg_arg("speed_planner_heading_error_rate_warning", "heading_error_rate_scale"),
+            heading_error_rate_critical_rad=scaled_deg_arg("speed_planner_heading_error_rate_critical", "heading_error_rate_scale"),
+            lateral_error_rate_activation=scaled_arg("speed_planner_lateral_error_rate_activation", "lateral_error_scale"),
+            heading_error_rate_activation_rad=scaled_deg_arg("speed_planner_heading_error_rate_activation", "heading_error_scale"),
+            error_rate_filter_alpha=arg_value(args, "speed_planner_error_rate_alpha"),
+            recovery_hold_steps=arg_value(args, "speed_planner_recovery_hold_steps"),
+            entry_max_speed_kmh=scaled_arg("speed_planner_entry_max_speed", "entry_max_speed_scale"),
+            entry_curvature_threshold=scaled_arg("speed_planner_entry_curvature_threshold", "entry_curvature_threshold_scale"),
+            entry_full_cap_curvature=scaled_arg("speed_planner_entry_full_cap_curvature", "entry_full_cap_curvature_scale"),
+            emergency_turn_speed_kmh=scaled_arg("speed_planner_emergency_turn_speed", "emergency_turn_speed_scale"),
+            emergency_curvature_threshold=arg_value(args, "speed_planner_emergency_curvature_threshold"),
+            emergency_full_cap_curvature=arg_value(args, "speed_planner_emergency_full_cap_curvature"),
         )
     )
 
@@ -234,42 +282,118 @@ def resolve_route_setup(world, args, clamp_spawn_index, rng):
         raise RuntimeError("No spawn points available.")
 
     if args.spawn_index is None:
-        spawn_index = rng.randrange(len(spawn_points))
+        spawn_candidates = list(range(len(spawn_points)))
+        rng.shuffle(spawn_candidates)
+        spawn_candidates = spawn_candidates[:min(len(spawn_candidates), 6)]
     else:
-        spawn_index = clamp_spawn_index(args.spawn_index, spawn_points)
+        spawn_candidates = [clamp_spawn_index(args.spawn_index, spawn_points)]
 
-    if args.destination_index is None:
-        destination_candidates = [idx for idx in range(len(spawn_points)) if idx != spawn_index]
-        if not destination_candidates:
-            raise RuntimeError("At least two spawn points are required to build a route.")
-        destination_index = rng.choice(destination_candidates)
+    route_trace = None
+    route_features = None
+    last_route_error = None
+    for spawn_index in spawn_candidates:
+        if args.destination_index is None:
+            destination_candidates = [idx for idx in range(len(spawn_points)) if idx != spawn_index]
+            if not destination_candidates:
+                raise RuntimeError("At least two spawn points are required to build a route.")
+            destination_index = rng.choice(destination_candidates)
+        else:
+            destination_index = clamp_spawn_index(args.destination_index, spawn_points)
+            if destination_index == spawn_index and len(spawn_points) > 1:
+                destination_index = (spawn_index + 1) % len(spawn_points)
+
+        spawn_point = spawn_points[spawn_index]
+        fallback_destination = spawn_points[destination_index].location
+        try:
+            route_trace, route_features = build_shaped_route(
+                world.get_map(),
+                spawn_point.location,
+                fallback_destination,
+                args.route_resolution,
+                args.route_min_length_m,
+                args.route_max_waypoints,
+                ROUTE_CLOSE_DISTANCE_M,
+                route_shape=args.route_shape,
+                length_tolerance=args.route_length_tolerance,
+                target_speed_kmh=arg_value(args, "target_speed"),
+                beam_width=arg_value(args, "planner_topology_beam_width"),
+            )
+            break
+        except RuntimeError as exc:
+            last_route_error = exc
+            retryable_route_error = (
+                "speed-feasible" in str(exc)
+                or "Failed to build curvy route" in str(exc)
+            )
+            if args.spawn_index is not None or not retryable_route_error:
+                raise
+
+    if route_trace is None:
+        raise RuntimeError(
+            f"No speed-feasible route was found across {len(spawn_candidates)} deterministic spawn candidates."
+        ) from last_route_error
+    topology_route = route_trace
+    route_features["raw_route_waypoints"] = len(route_trace)
+    route_features["raw_route_length"] = route_features.get("length", 0.0)
+
+    if arg_value(args, "planner_mode") == "frenet":
+        planner_config = FrenetPlannerConfig(
+            output_spacing_m=arg_value(args, "reference_sample_spacing") or args.route_resolution,
+            validation_spacing_m=arg_value(args, "planner_validation_spacing"),
+            vehicle_half_width_m=arg_value(args, "planner_vehicle_half_width"),
+            lane_margin_m=arg_value(args, "planner_lane_margin"),
+            lateral_beam_width=arg_value(args, "planner_lateral_beam_width"),
+            candidate_cap=arg_value(args, "planner_candidate_cap"),
+            deadline_s=arg_value(args, "planner_deadline"),
+            max_abs_curvature_1pm=arg_value(args, "planner_max_curvature"),
+            max_abs_curvature_rate_1pm2=arg_value(args, "planner_max_curvature_rate"),
+            max_lateral_accel_mps2=arg_value(args, "planner_max_lateral_accel"),
+            max_lateral_jerk_mps3=arg_value(args, "planner_max_lateral_jerk"),
+        )
+        trajectory, planner_features = plan_frenet_reference(
+            topology_route,
+            route_features,
+            arg_value(args, "target_speed"),
+            planner_config,
+        )
+        reference_trace = trajectory.to_route_trace()
     else:
-        destination_index = clamp_spawn_index(args.destination_index, spawn_points)
-        if destination_index == spawn_index and len(spawn_points) > 1:
-            destination_index = (spawn_index + 1) % len(spawn_points)
+        legacy_config = ReferencePathConfig(
+            sample_spacing_m=arg_value(args, "reference_sample_spacing") or args.route_resolution,
+            smoothing_window=arg_value(args, "reference_smoothing_window"),
+            lane_margin_m=arg_value(args, "reference_lane_margin"),
+            max_centerline_offset_m=arg_value(args, "reference_max_centerline_offset"),
+        )
+        legacy_metadata = {
+            "planner_mode": "legacy",
+            "planner_version": 1,
+            "target_speed_kmh": float(arg_value(args, "target_speed")),
+        }
+        trajectory, reference_trace, planner_features = build_legacy_reference_trajectory(
+            topology_route,
+            legacy_config,
+            legacy_metadata,
+        )
 
-    spawn_point = spawn_points[spawn_index]
-    fallback_destination = spawn_points[destination_index].location
-    route_trace, route_features = build_shaped_route(
-        world.get_map(),
-        spawn_point.location,
-        fallback_destination,
-        args.route_resolution,
-        args.route_min_length_m,
-        args.route_max_waypoints,
-        ROUTE_CLOSE_DISTANCE_M,
-        route_shape=args.route_shape,
-        length_tolerance=args.route_length_tolerance,
+    route_features.update(planner_features)
+    route_features["planner_mode"] = arg_value(args, "planner_mode")
+    route_features["reference_length_m"] = float(
+        getattr(trajectory, "length_m", route_features.get("reference_length_m", route_features["raw_route_length"]))
     )
+    route_features["reference_sample_count"] = len(reference_trace)
+    route_features["reference_path_enabled"] = True
+    route_features["reference_validation_passed"] = True
+    route_features["length"] = route_features["reference_length_m"]
+    route_trace = reference_trace
     destination = route_trace[-1][0].transform.location
-    return spawn_index, destination_index, spawn_point, destination, route_trace, route_features
+    return spawn_index, destination_index, spawn_point, destination, route_trace, route_features, trajectory
 
 
 def create_experiment_runtime(controller_name, vehicle, args):
     return {
         "controller": create_tracking_controller(controller_name, vehicle, args),
         "error_provider": create_error_provider(args.error_provider, args),
-        "speed_planner": build_speed_planner(args),
+        "speed_planner": build_speed_planner(args, controller_name=controller_name),
     }
 
 
@@ -329,7 +453,19 @@ def select_route_target(route_trace, vehicle_loc, last_index, look_ahead):
     return target_waypoint, road_option, target_index, closest_index, closest_distance
 
 
-def run_controller_lap(controller_name, world, blueprint_library, vehicle_bp, spawn_point, route_trace, args, display, display_width, display_height):
+def run_controller_lap(
+    controller_name,
+    world,
+    blueprint_library,
+    vehicle_bp,
+    spawn_point,
+    route_trace,
+    args,
+    display,
+    display_width,
+    display_height,
+    reference_trajectory=None,
+):
     vehicle = None
     camera = None
     collision_sensor = None
@@ -339,6 +475,7 @@ def run_controller_lap(controller_name, world, blueprint_library, vehicle_bp, sp
     metrics = create_metrics()
     route_index = 0
     previous_steer = 0.0
+    previous_speed = None
     zero_speed_terminator = CollisionZeroSpeedTerminator(
         timeout_seconds=args.collision_zero_speed_timeout,
         speed_threshold_mps=args.collision_zero_speed_threshold,
@@ -393,10 +530,14 @@ def run_controller_lap(controller_name, world, blueprint_library, vehicle_bp, sp
                 runtime["speed_planner"].last_risk = 0.0
                 runtime["speed_planner"].last_reason = "fixed_throttle_brake"
             else:
-                curvature_preview = build_curvature_preview(route_trace, closest_route_index)
+                curvature_preview = build_speed_planner_curvature_preview(
+                    route_trace,
+                    closest_route_index,
+                    speed_ms,
+                )
                 target_speed_ms = runtime["speed_planner"].plan_speed_mps(
                     curvature_preview,
-                    getattr(args, "control_dt", 0.05),
+                    getattr(args, "control_dt", CONTROL_DT),
                     lateral_error_m=tracking_errors["e_y"],
                     heading_error_rad=tracking_errors["e_psi"],
                 )
@@ -421,8 +562,33 @@ def run_controller_lap(controller_name, world, blueprint_library, vehicle_bp, sp
                 tracking_errors,
                 speed_plan_risk=runtime["speed_planner"].last_risk,
                 speed_plan_reason=runtime["speed_planner"].last_reason,
+                controller_debug={
+                    "controller_speed_profile": getattr(
+                        runtime["controller"],
+                        "last_speed_profile",
+                        "base",
+                    ),
+                    "raw_steer": getattr(runtime["controller"], "last_raw_steer", control.steer),
+                    "steer_rate_limit": getattr(runtime["controller"], "last_steer_rate_limit", 0.0),
+                    "steer_rate_limited": getattr(runtime["controller"], "last_steer_rate_limited", False),
+                    "current_curvature": getattr(runtime["controller"], "last_current_curvature", 0.0),
+                    "preview_curvature": getattr(runtime["controller"], "last_preview_curvature", 0.0),
+                    "lqr_gain_update_reason": getattr(runtime["controller"], "last_gain_update_reason", "none"),
+                    "mpc_solve_mode": getattr(runtime["controller"], "last_mpc_solve_mode", "not_applicable"),
+                    "mpc_cache_reused": getattr(runtime["controller"], "last_mpc_cache_reused", False),
+                    "mpc_reuse_count": getattr(runtime["controller"], "last_mpc_reuse_count", 0),
+                    "mpc_curvature0": getattr(runtime["controller"], "last_mpc_curvature0", 0.0),
+                    "mpc_curvature_max": getattr(runtime["controller"], "last_mpc_curvature_max", 0.0),
+                    "mpc_active_horizon": getattr(runtime["controller"], "last_mpc_active_horizon", 0),
+                    "mpc_steer_limit": getattr(runtime["controller"], "last_mpc_steer_limit", 0.0),
+                    "mpc_reference_steer0": getattr(runtime["controller"], "last_mpc_reference_steer0", 0.0),
+                },
+                collision_count=collision_count[0],
+                previous_speed=previous_speed,
+                dt=getattr(args, "control_dt", CONTROL_DT),
             )
             previous_steer = control.steer
+            previous_speed = snapshot["speed"]
             sim_time = world.get_snapshot().timestamp.elapsed_seconds
             append_step_data(
                 rows,
@@ -431,7 +597,7 @@ def run_controller_lap(controller_name, world, blueprint_library, vehicle_bp, sp
                 metrics,
                 controller_name,
                 args,
-                (route_index, closest_route_index, route_error, road_option),
+                (route_index, closest_route_index, route_error, road_option, len(route_trace)),
                 snapshot,
                 control,
                 sim_time,

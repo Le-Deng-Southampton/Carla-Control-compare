@@ -405,6 +405,7 @@ def build_shaped_route(
     route_shape="straight",
     length_tolerance=0.05,
     target_speed_kmh=None,
+    beam_width=24,
 ):
     if route_shape not in ROUTE_SHAPES:
         raise ValueError(f"Unsupported route shape '{route_shape}'. Expected one of {ROUTE_SHAPES}.")
@@ -421,7 +422,7 @@ def build_shaped_route(
         length_tolerance,
         route_shape,
         target_speed_kmh,
-        beam_width=24,
+        beam_width=beam_width,
     )
     route_trace, features = _select_shaped_candidate(candidates, route_shape, min_length_m, target_speed_kmh)
     if route_trace is not None:

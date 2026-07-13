@@ -25,15 +25,36 @@ from experiment import (
     run_controller_lap,
     save_compare_outputs,
 )
-from road_planning.route_planner import ROUTE_SHAPES
+from project_config import (
+    AUTO_MAP_NAME,
+    AUTO_ROUTE_SHAPE,
+    CLI_ARGUMENTS,
+    CONTROL_DT,
+    CURRENT_MAP_NAME,
+    DISPLAY_HEIGHT,
+    DISPLAY_WIDTH,
+    MAP_ROUTE_PROFILES,
+    ROUTE_SHAPE_MAP_PREFERENCES,
+    SPEED_PLANNER_CONFIG_FIELDS,
+    SUPPORTED_MAPS,
+    args_dict,
+    controller_args_dict,
+)
+from road_planning.route_planner import (
+    ROUTE_SHAPES,
+    estimate_route_max_waypoints,
+    speed_adaptive_route_defaults,
+)
+from road_planning.reference_trajectory import save_reference_trajectory
 
 
-DISPLAY_WIDTH = 1280
-DISPLAY_HEIGHT = 720
-CONTROL_DT = 0.05
 LOG_DIR = os.path.join(PROJECT_ROOT, "log")
-AUTO_ROUTE_SHAPE = "auto"
 DEFAULT_CONTROLLER_ORDER = get_supported_controller_names()
+
+
+def _add_configured_arguments(parser):
+    for flags, kwargs in CLI_ARGUMENTS:
+        parser.add_argument(*flags, **kwargs)
 
 
 def parse_args():
@@ -45,22 +66,12 @@ def parse_args():
         default=list(DEFAULT_CONTROLLER_ORDER),
         help="Controllers to include in the comparison run.",
     )
-    parser.add_argument("--spawn-index", type=int, default=None, help="Optional fixed spawn point index for repeatable tests.")
     parser.add_argument(
-        "--destination-index",
-        type=int,
-        default=None,
-        help="Optional fixed destination spawn point index for repeatable tests.",
+        "--map-name",
+        choices=(AUTO_MAP_NAME, CURRENT_MAP_NAME, *SUPPORTED_MAPS),
+        default=AUTO_MAP_NAME,
+        help="CARLA map to load. Use auto for speed/route-adaptive map selection, or current to keep the loaded world.",
     )
-    parser.add_argument("--target-speed", type=float, default=70.0, help="Target speed in km/h.")
-    parser.add_argument(
-        "--speed-planner-mode",
-        choices=("off", "adaptive"),
-        default="adaptive",
-        help="Use off for fixed-speed controller-only tests, or adaptive for integrated high-speed safety tests.",
-    )
-    parser.add_argument("--seed", type=int, default=None, help="Optional random seed used to reproduce a run.")
-    parser.add_argument("--route-resolution", type=float, default=1.0, help="Global route waypoint spacing in meters.")
     parser.add_argument(
         "--error-provider",
         choices=get_supported_error_provider_names(),
@@ -73,285 +84,7 @@ def parse_args():
         default=AUTO_ROUTE_SHAPE,
         help="Geometric route template selected from the CARLA road network.",
     )
-    parser.add_argument("--look-ahead", type=float, default=10.0, help="Base look-ahead distance in meters.")
-    parser.add_argument(
-        "--speed-planner-min-turn-speed",
-        type=float,
-        default=48.0,
-        help="Minimum planned speed in km/h for tight turns.",
-    )
-    parser.add_argument(
-        "--speed-planner-max-lateral-accel",
-        type=float,
-        default=18.0,
-        help="Maximum lateral acceleration in m/s^2 used by curvature speed planning.",
-    )
-    parser.add_argument(
-        "--speed-planner-max-accel",
-        type=float,
-        default=3.5,
-        help="Maximum planned target-speed increase in m/s^2.",
-    )
-    parser.add_argument(
-        "--speed-planner-max-decel",
-        type=float,
-        default=9.0,
-        help="Maximum planned target-speed decrease in m/s^2.",
-    )
-    parser.add_argument(
-        "--speed-planner-lateral-error-warning",
-        type=float,
-        default=1.6,
-        help="Lateral tracking error in meters where protective speed reduction starts.",
-    )
-    parser.add_argument(
-        "--speed-planner-lateral-error-critical",
-        type=float,
-        default=2.6,
-        help="Lateral tracking error in meters where protective speed reduction reaches its minimum.",
-    )
-    parser.add_argument(
-        "--speed-planner-heading-error-warning",
-        type=float,
-        default=12.0,
-        help="Heading error in degrees where protective speed reduction starts.",
-    )
-    parser.add_argument(
-        "--speed-planner-heading-error-critical",
-        type=float,
-        default=18.0,
-        help="Heading error in degrees where protective speed reduction reaches its minimum.",
-    )
-    parser.add_argument(
-        "--speed-planner-lateral-error-rate-warning",
-        type=float,
-        default=0.8,
-        help="Lateral tracking error growth rate in m/s where protective speed reduction starts.",
-    )
-    parser.add_argument(
-        "--speed-planner-lateral-error-rate-critical",
-        type=float,
-        default=1.6,
-        help="Lateral tracking error growth rate in m/s where protective speed reduction reaches its minimum.",
-    )
-    parser.add_argument(
-        "--speed-planner-heading-error-rate-warning",
-        type=float,
-        default=8.0,
-        help="Heading error growth rate in deg/s where protective speed reduction starts.",
-    )
-    parser.add_argument(
-        "--speed-planner-heading-error-rate-critical",
-        type=float,
-        default=16.0,
-        help="Heading error growth rate in deg/s where protective speed reduction reaches its minimum.",
-    )
-    parser.add_argument(
-        "--speed-planner-lateral-error-rate-activation",
-        type=float,
-        default=0.8,
-        help="Minimum lateral error in meters before lateral-error-rate slowdown can trigger.",
-    )
-    parser.add_argument(
-        "--speed-planner-heading-error-rate-activation",
-        type=float,
-        default=8.0,
-        help="Minimum heading error in degrees before heading-error-rate slowdown can trigger.",
-    )
-    parser.add_argument(
-        "--speed-planner-error-rate-alpha",
-        type=float,
-        default=0.25,
-        help="Low-pass blend factor for speed-planner tracking-error growth rates.",
-    )
-    parser.add_argument(
-        "--speed-planner-recovery-hold-steps",
-        type=int,
-        default=3,
-        help="Control steps to keep protective recovery active after risk clears.",
-    )
-    parser.add_argument(
-        "--speed-planner-entry-max-speed",
-        type=float,
-        default=70.0,
-        help="Maximum planned speed in km/h when entering a detected curve at high target speed.",
-    )
-    parser.add_argument(
-        "--speed-planner-entry-curvature-threshold",
-        type=float,
-        default=0.015,
-        help="Preview curvature threshold that activates the entry-corner speed cap.",
-    )
-    parser.add_argument(
-        "--speed-planner-entry-full-cap-curvature",
-        type=float,
-        default=0.03,
-        help="Preview curvature where the entry-corner cap reaches speed-planner-entry-max-speed.",
-    )
-    parser.add_argument(
-        "--collision-zero-speed-timeout",
-        type=float,
-        default=2.0,
-        help="Terminate the current controller after a collision if speed stays near zero for this many seconds.",
-    )
-    parser.add_argument(
-        "--collision-zero-speed-threshold",
-        type=float,
-        default=0.1,
-        help="Speed threshold in m/s used to treat the vehicle as stopped after a collision.",
-    )
-    parser.add_argument(
-        "--route-min-length-m",
-        type=float,
-        default=1700.0,
-        help="Minimum route length in meters before the loop can end.",
-    )
-    parser.add_argument(
-        "--route-max-waypoints",
-        type=int,
-        default=2000,
-        help="Maximum number of waypoints to follow when building the route.",
-    )
-    parser.add_argument(
-        "--route-length-tolerance",
-        type=float,
-        default=0.05,
-        help="Allowed route-length deviation ratio when selecting a shaped route.",
-    )
-    parser.add_argument(
-        "--noise-lateral-std",
-        type=float,
-        default=0.10,
-        help="Standard deviation of lateral-error noise for noisy_ground_truth.",
-    )
-    parser.add_argument(
-        "--noise-heading-std-deg",
-        type=float,
-        default=1.0,
-        help="Standard deviation of heading-error noise in degrees for noisy_ground_truth.",
-    )
-    parser.add_argument(
-        "--perception-delay-steps",
-        type=int,
-        default=0,
-        help="Number of control steps to delay noisy/perception-proxy tracking errors.",
-    )
-    parser.add_argument(
-        "--perception-dropout-probability",
-        type=float,
-        default=0.0,
-        help="Probability of reusing the previous noisy/perception-proxy tracking error sample.",
-    )
-    parser.add_argument(
-        "--perception-smoothing-alpha",
-        type=float,
-        default=1.0,
-        help="Blend factor for noisy/perception-proxy tracking errors; 1.0 disables smoothing.",
-    )
-    parser.add_argument("--lqr-q-ey", type=float, default=2.6, help="LQR lateral error weight.")
-    parser.add_argument("--lqr-q-ey-dot", type=float, default=1.10, help="LQR lateral error derivative weight.")
-    parser.add_argument("--lqr-q-epsi", type=float, default=6.0, help="LQR heading error weight.")
-    parser.add_argument("--lqr-q-epsi-dot", type=float, default=2.6, help="LQR heading error derivative weight.")
-    parser.add_argument("--lqr-r", type=float, default=8.0, help="LQR steering effort weight.")
-    parser.add_argument("--lqr-kp-long", type=float, default=0.6, help="LQR controller longitudinal P gain.")
-    parser.add_argument("--lqr-ki-long", type=float, default=0.01, help="LQR controller longitudinal I gain.")
-    parser.add_argument("--lqr-kd-long", type=float, default=0.06, help="LQR controller longitudinal D gain.")
-    parser.add_argument("--lqr-max-steer", type=float, default=0.55, help="Maximum LQR steering command.")
-    parser.add_argument(
-        "--lqr-max-steer-rate",
-        type=float,
-        default=0.16,
-        help="Maximum LQR steering change per control step.",
-    )
-    parser.add_argument(
-        "--lqr-derivative-alpha",
-        type=float,
-        default=0.20,
-        help="Low-pass blend factor for LQR error derivative states.",
-    )
-    parser.add_argument(
-        "--lqr-curvature-alpha",
-        type=float,
-        default=0.50,
-        help="Low-pass blend factor for LQR curvature feedforward.",
-    )
-    parser.add_argument(
-        "--lqr-feedforward-gain",
-        type=float,
-        default=1.0,
-        help="Gain applied to LQR bicycle-model curvature feedforward.",
-    )
-    parser.add_argument(
-        "--lqr-turn-in-rate-scale",
-        type=float,
-        default=0.70,
-        help="Scale applied to LQR steering-rate limit while adding turn-in near the lane centerline.",
-    )
-    parser.add_argument(
-        "--lqr-turn-in-guard-lateral-error",
-        type=float,
-        default=1.0,
-        help="Maximum lateral error in meters where LQR turn-in rate guarding is active.",
-    )
-    parser.add_argument(
-        "--lqr-turn-in-guard-heading-error",
-        type=float,
-        default=10.0,
-        help="Maximum heading error in degrees where LQR turn-in rate guarding is active.",
-    )
-    parser.add_argument(
-        "--lqr-turn-in-guard-max-curvature",
-        type=float,
-        default=0.04,
-        help="Maximum route curvature where LQR near-centerline turn-in rate guarding is active.",
-    )
-    parser.add_argument(
-        "--lqr-inside-error-feedforward-start",
-        type=float,
-        default=0.80,
-        help="Inside-curve lateral error in meters where LQR curvature feedforward attenuation starts.",
-    )
-    parser.add_argument(
-        "--lqr-inside-error-feedforward-full",
-        type=float,
-        default=1.80,
-        help="Inside-curve lateral error in meters where LQR curvature feedforward reaches its minimum scale.",
-    )
-    parser.add_argument(
-        "--lqr-inside-error-feedforward-min-scale",
-        type=float,
-        default=0.65,
-        help="Minimum LQR curvature feedforward scale when the vehicle is already inside the curve.",
-    )
-    parser.add_argument(
-        "--lqr-inside-error-feedforward-heading-limit",
-        type=float,
-        default=4.0,
-        help="Maximum heading error in degrees where inside-curve LQR feedforward attenuation is allowed.",
-    )
-    parser.add_argument("--mpc-horizon", type=int, default=16, help="MPC prediction horizon in control steps.")
-    parser.add_argument("--mpc-q-y", type=float, default=12.0, help="MPC lateral error weight.")
-    parser.add_argument("--mpc-q-psi", type=float, default=18.0, help="MPC heading error weight.")
-    parser.add_argument("--mpc-r-steer", type=float, default=0.8, help="MPC steering effort weight.")
-    parser.add_argument("--mpc-r-steer-rate", type=float, default=0.9, help="MPC steering-rate effort weight.")
-    parser.add_argument("--mpc-kp-long", type=float, default=0.6, help="MPC controller longitudinal P gain.")
-    parser.add_argument("--mpc-ki-long", type=float, default=0.01, help="MPC controller longitudinal I gain.")
-    parser.add_argument("--mpc-kd-long", type=float, default=0.06, help="MPC controller longitudinal D gain.")
-    parser.add_argument("--mpc-max-steer", type=float, default=0.65, help="Maximum MPC steering command.")
-    parser.add_argument(
-        "--mpc-max-steer-rate",
-        type=float,
-        default=0.30,
-        help="Maximum MPC steering change per control step.",
-    )
-    parser.add_argument("--pid-lat-kp", type=float, default=0.72, help="PID lateral P gain.")
-    parser.add_argument("--pid-lat-ki", type=float, default=0.005, help="PID lateral I gain.")
-    parser.add_argument("--pid-lat-kd", type=float, default=0.38, help="PID lateral D gain.")
-    parser.add_argument("--pid-long-kp", type=float, default=0.45, help="PID longitudinal P gain.")
-    parser.add_argument("--pid-long-ki", type=float, default=0.01, help="PID longitudinal I gain.")
-    parser.add_argument("--pid-long-kd", type=float, default=0.10, help="PID longitudinal D gain.")
-    parser.add_argument("--pid-max-throttle", type=float, default=1.0, help="Maximum PID throttle command.")
-    parser.add_argument("--pid-max-brake", type=float, default=0.28, help="Maximum PID brake command.")
+    _add_configured_arguments(parser)
     return parser.parse_args()
 
 
@@ -365,10 +98,144 @@ def choose_run_seed(requested_seed):
     return random.SystemRandom().randrange(1, 1_000_000_000)
 
 
-def choose_route_shape(requested_route_shape, rng):
-    if requested_route_shape != AUTO_ROUTE_SHAPE:
-        return requested_route_shape
-    return rng.choice(ROUTE_SHAPES)
+def apply_speed_adaptive_route_settings(args):
+    profile = speed_adaptive_route_defaults(args.target_speed)
+    requested_route_shape = args.route_shape
+    requested_route_length = args.route_min_length_m
+    requested_max_waypoints = args.route_max_waypoints
+
+    args.route_shape = (
+        requested_route_shape
+        if requested_route_shape != AUTO_ROUTE_SHAPE
+        else profile["route_shape"]
+    )
+    args.route_shape_source = "speed_adaptive" if requested_route_shape == AUTO_ROUTE_SHAPE else "manual"
+
+    if requested_route_length is None:
+        args.route_min_length_m = profile["min_length_m"]
+        args.route_length_source = "speed_adaptive"
+    else:
+        args.route_length_source = "manual"
+
+    if requested_max_waypoints is None:
+        args.route_max_waypoints = estimate_route_max_waypoints(
+            args.route_min_length_m,
+            args.route_resolution,
+            args.route_length_tolerance,
+        )
+        args.route_max_waypoints_source = "speed_adaptive"
+    else:
+        args.route_max_waypoints_source = "manual"
+
+    args.route_speed_band = profile["speed_band"]
+    args.route_auto_shape = profile["route_shape"]
+    args.route_auto_min_length_m = profile["min_length_m"]
+    args.route_base_min_length_m = profile["min_length_m"]
+    args.route_auto_target_duration_s = profile.get("target_duration_s")
+    return args
+
+
+def _base_map_name(map_name):
+    if map_name and map_name.endswith("_Opt"):
+        return map_name[:-4]
+    return map_name
+
+
+def _map_route_profile(map_name):
+    return MAP_ROUTE_PROFILES.get(_base_map_name(map_name), MAP_ROUTE_PROFILES["Town03"])
+
+
+def choose_map_name(requested_map_name, route_shape, target_speed_kmh):
+    if requested_map_name != AUTO_MAP_NAME:
+        return requested_map_name
+
+    preferences = ROUTE_SHAPE_MAP_PREFERENCES.get(route_shape, SUPPORTED_MAPS)
+    route_profile = speed_adaptive_route_defaults(target_speed_kmh)
+    target_length_m = route_profile["min_length_m"]
+    speed_band = route_profile["speed_band"]
+    scored = []
+
+    for preference_index, map_name in enumerate(preferences):
+        map_profile = _map_route_profile(map_name)
+        speed_penalty = 0.0 if speed_band in map_profile["speed_bands"] else 2.0
+        capacity_penalty = max(0.0, target_length_m - map_profile["max_auto_length_m"]) / 500.0
+        short_route_penalty = max(0.0, map_profile["min_auto_length_m"] - target_length_m) / 800.0
+        optimized_penalty = 0.05 if map_name.endswith("_Opt") else 0.0
+        score = preference_index * 0.25 + speed_penalty + capacity_penalty + short_route_penalty + optimized_penalty
+        scored.append((score, map_name))
+
+    scored.sort(key=lambda item: (item[0], item[1]))
+    return scored[0][1]
+
+
+def apply_map_adaptive_route_settings(args):
+    selected_map = getattr(args, "selected_map_name", getattr(args, "map_name", None))
+    if not selected_map or selected_map == CURRENT_MAP_NAME:
+        return args
+
+    map_profile = _map_route_profile(selected_map)
+    args.route_map_length_scale = map_profile["length_scale"]
+    args.route_map_min_length_m = map_profile["min_auto_length_m"]
+    args.route_map_max_length_m = map_profile["max_auto_length_m"]
+
+    if getattr(args, "route_length_source", None) == "manual":
+        return args
+
+    base_length_m = getattr(args, "route_base_min_length_m", None)
+    if base_length_m is None:
+        base_length_m = getattr(args, "route_min_length_m", None)
+    if base_length_m is None:
+        return args
+    scaled_length_m = base_length_m * map_profile["length_scale"]
+    args.route_min_length_m = min(
+        max(scaled_length_m, map_profile["min_auto_length_m"]),
+        map_profile["max_auto_length_m"],
+    )
+    args.route_length_source = "speed_map_adaptive"
+
+    if getattr(args, "route_max_waypoints_source", None) != "manual":
+        args.route_max_waypoints = estimate_route_max_waypoints(
+            args.route_min_length_m,
+            getattr(args, "route_resolution", 2.0),
+            getattr(args, "route_length_tolerance", 0.05),
+        )
+
+    return args
+
+
+def _short_map_name(world):
+    try:
+        map_name = world.get_map().name
+    except Exception:
+        return None
+    return os.path.basename(str(map_name).replace("\\", "/"))
+
+
+def load_selected_world(client, args):
+    selected_map = choose_map_name(args.map_name, args.route_shape, args.target_speed)
+    args.map_name_source = "speed_adaptive" if args.map_name == AUTO_MAP_NAME else "manual"
+    args.requested_map_name = args.map_name
+
+    if selected_map == CURRENT_MAP_NAME:
+        world = client.get_world()
+        args.map_name = _short_map_name(world) or CURRENT_MAP_NAME
+        args.selected_map_name = args.map_name
+        args.map_name_source = "current"
+        apply_map_adaptive_route_settings(args)
+        return world
+
+    world = client.get_world()
+    current_map = _short_map_name(world)
+    if current_map != selected_map:
+        print(f"Loading CARLA map: {selected_map}")
+        world = client.load_world(selected_map)
+    else:
+        print(f"Using already loaded CARLA map: {selected_map}")
+
+    args.map_name = selected_map
+    args.selected_map_name = selected_map
+    apply_map_adaptive_route_settings(args)
+    return world
 
 
 def build_run_output_dir(log_dir, run_timestamp, seed, route_shape):
@@ -376,16 +243,122 @@ def build_run_output_dir(log_dir, run_timestamp, seed, route_shape):
     return os.path.join(log_dir, run_dir_name)
 
 
-def build_run_config(args, controller_order, spawn_index, destination_index, destination, route_trace, route_features):
+def _location_config(location):
+    return {"x": location.x, "y": location.y, "z": location.z}
+
+
+def _reference_path_config(args, route_trace, route_features):
+    return {
+        "enabled": route_features.get("reference_path_enabled", False),
+        "validation_passed": route_features.get("reference_validation_passed", False),
+        "sample_spacing_m": route_features.get("reference_sample_spacing_m", args.reference_sample_spacing),
+        "smoothing_window": route_features.get("reference_smoothing_window", args.reference_smoothing_window),
+        "lane_margin_m": route_features.get("reference_lane_margin_m", args.reference_lane_margin),
+        "sample_count": route_features.get("reference_sample_count", len(route_trace)),
+        "length_m": route_features.get("reference_length_m", route_features["length"]),
+        "lane_boundary_violation_count": route_features.get("reference_lane_boundary_violation_count", 0),
+        "min_lane_clearance_m": route_features.get("reference_min_lane_clearance_m", 0.0),
+        "mean_centerline_offset_m": route_features.get("reference_mean_centerline_offset_m", 0.0),
+        "max_centerline_offset_m": route_features.get("reference_max_centerline_offset_m", 0.0),
+        "mean_smoothing_offset_m": route_features.get("reference_mean_smoothing_offset_m", 0.0),
+        "max_smoothing_offset_m": route_features.get("reference_max_smoothing_offset_m", 0.0),
+        "mean_abs_curvature": route_features.get("reference_mean_abs_curvature", 0.0),
+        "max_abs_curvature": route_features.get("reference_max_abs_curvature", 0.0),
+        "min_lane_width_m": route_features.get("reference_min_lane_width_m", 0.0),
+        "mean_lane_width_m": route_features.get("reference_mean_lane_width_m", 0.0),
+    }
+
+
+def _scene_coverage_config(route_features):
+    return {
+        "straight_m": route_features.get("reference_straight_m", 0.0),
+        "gentle_curve_m": route_features.get("reference_gentle_curve_m", 0.0),
+        "moderate_curve_m": route_features.get("reference_moderate_curve_m", 0.0),
+        "tight_curve_m": route_features.get("reference_tight_curve_m", 0.0),
+        "s_curve_sign_changes": route_features.get("reference_s_curve_sign_changes", 0),
+        "junction_samples": route_features.get("reference_junction_samples", 0),
+        "narrow_lane_samples": route_features.get("reference_narrow_lane_samples", 0),
+    }
+
+
+def _route_config(args, route_trace, route_features):
+    return {
+        "length_m": route_features["length"],
+        "raw_length_m": route_features.get("raw_route_length", route_features["length"]),
+        "route_shape": args.route_shape,
+        "route_label": route_features.get("route_label", args.route_shape),
+        "route_shape_source": getattr(args, "route_shape_source", "manual"),
+        "route_length_source": getattr(args, "route_length_source", "manual"),
+        "route_speed_band": getattr(args, "route_speed_band", None),
+        "route_auto_shape": getattr(args, "route_auto_shape", args.route_shape),
+        "route_auto_min_length_m": getattr(args, "route_auto_min_length_m", args.route_min_length_m),
+        "route_auto_target_duration_s": getattr(args, "route_auto_target_duration_s", None),
+        "route_base_min_length_m": getattr(args, "route_base_min_length_m", args.route_min_length_m),
+        "route_map_length_scale": getattr(args, "route_map_length_scale", None),
+        "route_map_min_length_m": getattr(args, "route_map_min_length_m", None),
+        "route_map_max_length_m": getattr(args, "route_map_max_length_m", None),
+        "route_max_waypoints": args.route_max_waypoints,
+        "raw_waypoints": route_features.get("raw_route_waypoints", len(route_trace)),
+        "sign_changes": route_features["sign_changes"],
+        "total_abs_turn_deg": float(np.degrees(route_features["total_abs_turn"])),
+        "mean_abs_curvature": route_features.get("mean_abs_curvature", 0.0),
+        "max_abs_curvature": route_features.get("max_abs_curvature", 0.0),
+        "turn_segments": route_features["turn_segments"],
+        "waypoints": len(route_trace),
+        "reference_path": _reference_path_config(args, route_trace, route_features),
+        "scene_coverage": _scene_coverage_config(route_features),
+    }
+
+
+def _planner_run_config(args, route_features, trajectory):
+    metadata = dict(getattr(trajectory, "metadata", {}) or {})
+    return {
+        "mode": args.planner_mode,
+        "version": int(metadata.get("planner_version", 1)),
+        "trajectory_hash": trajectory.content_hash(),
+        "planning_duration_s": float(route_features.get("planning_duration_s", 0.0)),
+        "config": {
+            "output_spacing_m": args.reference_sample_spacing,
+            "validation_spacing_m": args.planner_validation_spacing,
+            "vehicle_half_width_m": args.planner_vehicle_half_width,
+            "lane_margin_m": args.planner_lane_margin,
+            "topology_beam_width": args.planner_topology_beam_width,
+            "lateral_beam_width": args.planner_lateral_beam_width,
+            "candidate_cap": args.planner_candidate_cap,
+            "deadline_s": args.planner_deadline,
+            "max_abs_curvature_1pm": args.planner_max_curvature,
+            "max_abs_curvature_rate_1pm2": args.planner_max_curvature_rate,
+            "max_lateral_accel_mps2": args.planner_max_lateral_accel,
+            "max_lateral_jerk_mps3": args.planner_max_lateral_jerk,
+        },
+    }
+
+
+def assert_frozen_trajectory(trajectory, frozen_hash):
+    current_hash = trajectory.content_hash()
+    if current_hash != frozen_hash:
+        raise RuntimeError(
+            "frozen reference trajectory hash mismatch: "
+            f"expected {frozen_hash}, got {current_hash}"
+        )
+
+
+def build_run_config(args, controller_order, spawn_index, destination_index, destination, route_trace, route_features, trajectory):
     return {
         "controllers": list(controller_order),
         "destination_index": destination_index,
-        "destination_location": {
-            "x": destination.x,
-            "y": destination.y,
-            "z": destination.z,
-        },
+        "destination_location": _location_config(destination),
         "error_provider": args.error_provider,
+        "carla": {
+            "host": args.carla_host,
+            "port": args.carla_port,
+            "timeout": args.carla_timeout,
+        },
+        "map": {
+            "name": getattr(args, "selected_map_name", getattr(args, "map_name", None)),
+            "requested": getattr(args, "requested_map_name", getattr(args, "map_name", None)),
+            "source": getattr(args, "map_name_source", "manual"),
+        },
         "noise_heading_std_deg": args.noise_heading_std_deg,
         "noise_lateral_std": args.noise_lateral_std,
         "perception_delay_steps": args.perception_delay_steps,
@@ -393,84 +366,19 @@ def build_run_config(args, controller_order, spawn_index, destination_index, des
         "perception_smoothing_alpha": args.perception_smoothing_alpha,
         "collision_zero_speed_timeout": args.collision_zero_speed_timeout,
         "collision_zero_speed_threshold": args.collision_zero_speed_threshold,
-        "route": {
-            "length_m": route_features["length"],
-            "route_shape": args.route_shape,
-            "route_label": route_features.get("route_label", args.route_shape),
-            "sign_changes": route_features["sign_changes"],
-            "total_abs_turn_deg": float(np.degrees(route_features["total_abs_turn"])),
-            "mean_abs_curvature": route_features.get("mean_abs_curvature", 0.0),
-            "max_abs_curvature": route_features.get("max_abs_curvature", 0.0),
-            "turn_segments": route_features["turn_segments"],
-            "waypoints": len(route_trace),
+        "route": _route_config(args, route_trace, route_features),
+        "planner": _planner_run_config(args, route_features, trajectory),
+        "tracker": {
+            "max_rollback_m": args.tracker_max_rollback,
+            "hold_steps": args.tracker_hold_steps,
         },
         "seed": args.seed,
         "spawn_index": spawn_index,
         "target_speed_kmh": args.target_speed,
-        "speed_planner": {
-            "mode": args.speed_planner_mode,
-            "min_turn_speed_kmh": args.speed_planner_min_turn_speed,
-            "max_lateral_accel": args.speed_planner_max_lateral_accel,
-            "max_accel": args.speed_planner_max_accel,
-            "max_decel": args.speed_planner_max_decel,
-            "lateral_error_warning": args.speed_planner_lateral_error_warning,
-            "lateral_error_critical": args.speed_planner_lateral_error_critical,
-            "heading_error_warning_deg": args.speed_planner_heading_error_warning,
-            "heading_error_critical_deg": args.speed_planner_heading_error_critical,
-            "lateral_error_rate_warning": args.speed_planner_lateral_error_rate_warning,
-            "lateral_error_rate_critical": args.speed_planner_lateral_error_rate_critical,
-            "heading_error_rate_warning_deg": args.speed_planner_heading_error_rate_warning,
-            "heading_error_rate_critical_deg": args.speed_planner_heading_error_rate_critical,
-            "lateral_error_rate_activation": args.speed_planner_lateral_error_rate_activation,
-            "heading_error_rate_activation_deg": args.speed_planner_heading_error_rate_activation,
-            "error_rate_filter_alpha": args.speed_planner_error_rate_alpha,
-            "recovery_hold_steps": args.speed_planner_recovery_hold_steps,
-            "entry_max_speed_kmh": args.speed_planner_entry_max_speed,
-            "entry_curvature_threshold": args.speed_planner_entry_curvature_threshold,
-            "entry_full_cap_curvature": args.speed_planner_entry_full_cap_curvature,
-        },
-        "lqr": {
-            "q_ey": args.lqr_q_ey,
-            "q_ey_dot": args.lqr_q_ey_dot,
-            "q_epsi": args.lqr_q_epsi,
-            "q_epsi_dot": args.lqr_q_epsi_dot,
-            "r": args.lqr_r,
-            "max_steer": args.lqr_max_steer,
-            "max_steer_rate": args.lqr_max_steer_rate,
-            "derivative_alpha": args.lqr_derivative_alpha,
-            "curvature_alpha": args.lqr_curvature_alpha,
-            "feedforward_gain": args.lqr_feedforward_gain,
-            "turn_in_rate_scale": args.lqr_turn_in_rate_scale,
-            "turn_in_guard_lateral_error": args.lqr_turn_in_guard_lateral_error,
-            "turn_in_guard_heading_error_deg": args.lqr_turn_in_guard_heading_error,
-            "turn_in_guard_max_curvature": args.lqr_turn_in_guard_max_curvature,
-            "inside_error_feedforward_start": args.lqr_inside_error_feedforward_start,
-            "inside_error_feedforward_full": args.lqr_inside_error_feedforward_full,
-            "inside_error_feedforward_min_scale": args.lqr_inside_error_feedforward_min_scale,
-            "inside_error_feedforward_heading_limit_deg": args.lqr_inside_error_feedforward_heading_limit,
-        },
-        "mpc": {
-            "horizon": args.mpc_horizon,
-            "q_y": args.mpc_q_y,
-            "q_psi": args.mpc_q_psi,
-            "r_steer": args.mpc_r_steer,
-            "r_steer_rate": args.mpc_r_steer_rate,
-            "kp_long": args.mpc_kp_long,
-            "ki_long": args.mpc_ki_long,
-            "kd_long": args.mpc_kd_long,
-            "max_steer": args.mpc_max_steer,
-            "max_steer_rate": args.mpc_max_steer_rate,
-        },
-        "pid": {
-            "lat_kp": args.pid_lat_kp,
-            "lat_ki": args.pid_lat_ki,
-            "lat_kd": args.pid_lat_kd,
-            "long_kp": args.pid_long_kp,
-            "long_ki": args.pid_long_ki,
-            "long_kd": args.pid_long_kd,
-            "max_throttle": args.pid_max_throttle,
-            "max_brake": args.pid_max_brake,
-        },
+        "speed_planner": args_dict(args, SPEED_PLANNER_CONFIG_FIELDS),
+        "lqr": controller_args_dict(args, "lqr"),
+        "mpc": controller_args_dict(args, "mpc"),
+        "pid": controller_args_dict(args, "pid"),
     }
 
 
@@ -479,25 +387,48 @@ def compare_main():
     controller_order = tuple(args.controllers)
     args.seed = choose_run_seed(args.seed)
     rng = random.Random(args.seed)
-    args.route_shape = choose_route_shape(args.route_shape, rng)
+    apply_speed_adaptive_route_settings(args)
     random.seed(args.seed)
     display = create_display("CARLA Controller Comparison", DISPLAY_WIDTH, DISPLAY_HEIGHT)
 
-    client = carla.Client("localhost", 2000)
-    client.set_timeout(20.0)
-    world = client.get_world()
+    client = carla.Client(args.carla_host, args.carla_port)
+    client.set_timeout(args.carla_timeout)
+    world = load_selected_world(client, args)
     original_settings = None
 
     try:
         original_settings = configure_world(world, CONTROL_DT)
         blueprint_library, vehicle_bp = get_vehicle_blueprint(world)
-        spawn_index, destination_index, spawn_point, destination, route_trace, route_features = resolve_route_setup(
+        spawn_index, destination_index, spawn_point, destination, route_trace, route_features, trajectory = resolve_route_setup(
             world,
             args,
             clamp_spawn_index,
             rng,
         )
         args.route_label = route_features.get("route_label", args.route_shape)
+
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_output_dir = build_run_output_dir(LOG_DIR, timestamp_str, args.seed, args.route_shape)
+        os.makedirs(run_output_dir, exist_ok=True)
+        frozen_hash = trajectory.content_hash()
+        save_reference_trajectory(
+            os.path.join(run_output_dir, "reference_trajectory.json"),
+            trajectory,
+            execution_metadata={
+                "planning_duration_s": float(route_features.get("planning_duration_s", 0.0)),
+                "seed": args.seed,
+            },
+        )
+        run_config = build_run_config(
+            args,
+            controller_order,
+            spawn_index,
+            destination_index,
+            destination,
+            route_trace,
+            route_features,
+            trajectory,
+        )
 
         print(f"Comparison route built: {len(route_trace)} waypoints.")
         print(
@@ -518,6 +449,7 @@ def compare_main():
         trajectories = {}
 
         for controller_name in controller_order:
+            assert_frozen_trajectory(trajectory, frozen_hash)
             rows, xs, ys, metrics, aborted = run_controller_lap(
                 controller_name,
                 world,
@@ -529,6 +461,7 @@ def compare_main():
                 display,
                 DISPLAY_WIDTH,
                 DISPLAY_HEIGHT,
+                trajectory,
             )
             all_rows.extend(rows)
             trajectories[controller_name] = (xs, ys)
@@ -537,20 +470,10 @@ def compare_main():
                 print("Comparison stopped by user before both laps finished.")
                 break
 
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_output_dir = build_run_output_dir(LOG_DIR, timestamp_str, args.seed, args.route_shape)
-        run_config = build_run_config(
-            args,
-            controller_order,
-            spawn_index,
-            destination_index,
-            destination,
-            route_trace,
-            route_features,
-        )
         save_compare_outputs(run_output_dir, all_rows, summaries, trajectories, controller_order, run_config)
     except Exception as exc:
         print(f"An error occurred: {exc}")
+        raise
     finally:
         if original_settings is not None:
             try:
