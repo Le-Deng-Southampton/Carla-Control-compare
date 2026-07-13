@@ -350,6 +350,71 @@ class CurvatureSpeedPlannerTest(unittest.TestCase):
 
 
 class RuntimeSpeedPlanningTest(unittest.TestCase):
+    def test_continuous_reference_step_uses_projection_and_arc_length_target(self):
+        reference_waypoint = object()
+        target_waypoint = object()
+        trajectory = SimpleNamespace(
+            waypoint_at=mock.Mock(side_effect=lambda s_m: {
+                12.5: reference_waypoint,
+                20.0: target_waypoint,
+            }[s_m]),
+        )
+        projection = SimpleNamespace(s_ref_m=12.5, segment_index=4, projection_distance_m=0.3)
+        tracker = SimpleNamespace(
+            update=mock.Mock(return_value=projection),
+            target_sample=mock.Mock(return_value=SimpleNamespace(s_m=20.0, road_option="LEFT")),
+        )
+        vehicle = SimpleNamespace(
+            get_location=lambda: SimpleNamespace(x=3.0, y=4.0),
+            get_transform=lambda: SimpleNamespace(rotation=SimpleNamespace(yaw=30.0)),
+        )
+
+        result = runtime_module.build_continuous_reference_step(
+            tracker,
+            trajectory,
+            vehicle,
+            speed_mps=10.0,
+            control_dt=0.05,
+            lookahead_m=7.5,
+            allow_recovery=False,
+        )
+
+        self.assertIs(result.reference_waypoint, reference_waypoint)
+        self.assertIs(result.target_waypoint, target_waypoint)
+        self.assertIs(result.projection, projection)
+        self.assertEqual(result.road_option, "LEFT")
+        tracker.update.assert_called_once_with(3.0, 4.0, np.radians(30.0), 10.0, 0.05, allow_recovery=False)
+        tracker.target_sample.assert_called_once_with(7.5)
+
+    def test_tracker_curvature_previews_use_physical_metres(self):
+        tracker = SimpleNamespace(
+            curvature_preview=mock.Mock(side_effect=lambda distances: [float(value) for value in distances])
+        )
+
+        controller_preview = build_controller_curvature_preview(
+            route_trace=None,
+            reference_index=None,
+            speed_mps=40.0,
+            horizon=4,
+            dt=0.05,
+            tracker=tracker,
+        )
+        speed_preview = build_speed_planner_curvature_preview(
+            route_trace=None,
+            reference_index=None,
+            speed_mps=40.0,
+            preview_time_step=0.40,
+            min_preview_spacing_m=5.0,
+            preview_count=4,
+            tracker=tracker,
+        )
+
+        self.assertEqual(controller_preview, [0.0, 2.0, 4.0, 6.0])
+        self.assertEqual(speed_preview, [0.0, 16.0, 32.0, 48.0])
+        self.assertEqual(tracker.curvature_preview.call_args_list[0].args[0], [0.0])
+        self.assertEqual(tracker.curvature_preview.call_args_list[1].args[0], [0.0, 2.0, 4.0, 6.0])
+        self.assertEqual(tracker.curvature_preview.call_args_list[2].args[0], [0.0, 16.0, 32.0, 48.0])
+
     def test_log_header_includes_speed_plan_observability_fields(self):
         self.assertIn("speed_plan_risk", LOG_HEADER)
         self.assertIn("speed_plan_reason", LOG_HEADER)

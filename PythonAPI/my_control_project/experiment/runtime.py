@@ -1,4 +1,5 @@
 from queue import Empty, Queue
+from dataclasses import dataclass
 
 import carla
 import numpy as np
@@ -9,6 +10,7 @@ from error_providers import create_error_provider
 from project_config import CONTROLLER_SPEED_LIMIT_PROFILES, CONTROL_DT, arg_value
 from road_planning.frenet_planner import FrenetPlannerConfig, plan_frenet_reference
 from road_planning.reference_path import ReferencePathConfig, build_legacy_reference_trajectory
+from road_planning.reference_tracker import ReferenceTracker, ReferenceTrackingFailure
 from road_planning.route_planner import build_shaped_route
 from speed_planning import CurvatureSpeedPlanner, SpeedPlannerConfig
 
@@ -18,6 +20,42 @@ from .termination import CollisionZeroSpeedTerminator
 
 
 ROUTE_CLOSE_DISTANCE_M = 8.0
+
+
+@dataclass(frozen=True)
+class ContinuousReferenceStep:
+    projection: object
+    reference_waypoint: object
+    target_waypoint: object
+    road_option: str
+
+
+def build_continuous_reference_step(
+    tracker,
+    trajectory,
+    vehicle,
+    speed_mps,
+    control_dt,
+    lookahead_m,
+    allow_recovery=False,
+):
+    vehicle_loc = vehicle.get_location()
+    vehicle_yaw_rad = np.radians(float(vehicle.get_transform().rotation.yaw))
+    projection = tracker.update(
+        vehicle_loc.x,
+        vehicle_loc.y,
+        vehicle_yaw_rad,
+        speed_mps,
+        control_dt,
+        allow_recovery=allow_recovery,
+    )
+    target_sample = tracker.target_sample(lookahead_m)
+    return ContinuousReferenceStep(
+        projection=projection,
+        reference_waypoint=trajectory.waypoint_at(projection.s_ref_m),
+        target_waypoint=trajectory.waypoint_at(target_sample.s_m),
+        road_option=target_sample.road_option,
+    )
 
 
 class SimpleHUD:
@@ -111,13 +149,20 @@ def build_controller_curvature_preview(
     horizon,
     dt,
     curvature_fn=route_curvature,
+    tracker=None,
 ):
-    current_abs_curvature = abs(curvature_fn(route_trace, reference_index))
+    if tracker is None:
+        current_abs_curvature = abs(curvature_fn(route_trace, reference_index))
+    else:
+        current_abs_curvature = abs(tracker.curvature_preview([0.0])[0])
     curve_spacing_scale = 1.0
     if current_abs_curvature > 0.04:
         curve_spacing_scale = float(np.clip(0.04 / current_abs_curvature, 0.45, 1.0))
     distance_per_step_m = max(float(speed_mps) * float(dt) * curve_spacing_scale, 1.0)
-    preview_steps = [int(round(step * distance_per_step_m)) for step in range(max(int(horizon), 1))]
+    preview_distances = [step * distance_per_step_m for step in range(max(int(horizon), 1))]
+    if tracker is not None:
+        return tracker.curvature_preview(preview_distances)
+    preview_steps = [int(round(distance)) for distance in preview_distances]
     return build_curvature_preview(
         route_trace,
         reference_index,
@@ -134,9 +179,13 @@ def build_speed_planner_curvature_preview(
     min_preview_spacing_m=7.0,
     preview_count=6,
     curvature_fn=route_curvature,
+    tracker=None,
 ):
     spacing_m = max(float(speed_mps) * float(preview_time_step), float(min_preview_spacing_m))
-    preview_steps = [int(round(step * spacing_m)) for step in range(max(int(preview_count), 1))]
+    preview_distances = [step * spacing_m for step in range(max(int(preview_count), 1))]
+    if tracker is not None:
+        return tracker.curvature_preview(preview_distances)
+    preview_steps = [int(round(distance)) for distance in preview_distances]
     return build_curvature_preview(
         route_trace,
         reference_index,
@@ -407,9 +456,13 @@ def apply_controller_step(
     reference_index,
     planned_target_speed_mps=None,
     tracking_errors=None,
+    reference_tracker=None,
 ):
     curvature_index = reference_index if reference_index is not None else target_index
-    curvature = route_curvature(route_trace, curvature_index)
+    if reference_tracker is None:
+        curvature = route_curvature(route_trace, curvature_index)
+    else:
+        curvature = reference_tracker.curvature_preview([0.0])[0]
     if getattr(controller, "supports_curvature_sequence", False):
         velocity = vehicle.get_velocity()
         speed_mps = np.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2)
@@ -419,6 +472,7 @@ def apply_controller_step(
             speed_mps=speed_mps,
             horizon=getattr(controller, "horizon", 1),
             dt=getattr(controller, "dt", 0.05),
+            tracker=reference_tracker,
         )
     return controller.run_step(
         vehicle,
@@ -460,11 +514,11 @@ def run_controller_lap(
     vehicle_bp,
     spawn_point,
     route_trace,
+    reference_trajectory,
     args,
     display,
     display_width,
     display_height,
-    reference_trajectory=None,
 ):
     vehicle = None
     camera = None
@@ -492,6 +546,11 @@ def run_controller_lap(
 
         collision_sensor.listen(on_collision)
         runtime = create_experiment_runtime(controller_name, vehicle, args)
+        tracker = ReferenceTracker(
+            reference_trajectory,
+            max_rollback_m=arg_value(args, "tracker_max_rollback"),
+            hold_steps=arg_value(args, "tracker_hold_steps"),
+        )
         camera, image_queue = spawn_camera(world, blueprint_library, vehicle, display_width, display_height)
         hud = SimpleHUD(display_width, display_height)
         clock = pygame.time.Clock()
@@ -510,14 +569,28 @@ def run_controller_lap(
             speed = vehicle.get_velocity()
             speed_ms = np.sqrt(speed.x ** 2 + speed.y ** 2 + speed.z ** 2)
             dyn_lookahead = compute_lookahead(args.look_ahead, speed_ms)
+            try:
+                reference_step = build_continuous_reference_step(
+                    tracker,
+                    reference_trajectory,
+                    vehicle,
+                    speed_ms,
+                    getattr(args, "control_dt", CONTROL_DT),
+                    dyn_lookahead,
+                    allow_recovery=collision_count[0] > 0 or speed_ms < 1.0,
+                )
+            except ReferenceTrackingFailure as exc:
+                metrics["tracking_failure_reason"] = str(exc)
+                print(f"{controller_name.upper()} lap terminated: reference tracking failed ({exc}).")
+                return rows, positions_x, positions_y, metrics, False
 
-            target_waypoint, road_option, route_index, closest_route_index, route_error = select_route_target(
-                route_trace,
-                vehicle_loc,
-                route_index,
-                dyn_lookahead,
-            )
-            reference_waypoint = route_trace[closest_route_index][0]
+            projection = reference_step.projection
+            target_waypoint = reference_step.target_waypoint
+            reference_waypoint = reference_step.reference_waypoint
+            road_option = reference_step.road_option
+            route_index = projection.segment_index
+            closest_route_index = projection.segment_index
+            route_error = projection.projection_distance_m
             tracking_errors = runtime["error_provider"].compute(
                 vehicle,
                 target_waypoint,
@@ -534,6 +607,7 @@ def run_controller_lap(
                     route_trace,
                     closest_route_index,
                     speed_ms,
+                    tracker=tracker,
                 )
                 target_speed_ms = runtime["speed_planner"].plan_speed_mps(
                     curvature_preview,
@@ -551,6 +625,7 @@ def run_controller_lap(
                 closest_route_index,
                 planned_target_speed_mps=target_speed_ms,
                 tracking_errors=tracking_errors,
+                reference_tracker=tracker,
             )
             vehicle.apply_control(control)
 
@@ -623,7 +698,7 @@ def run_controller_lap(
                 )
                 return rows, positions_x, positions_y, metrics, False
 
-            if route_index >= len(route_trace) - 2:
+            if not projection.held and tracker.is_complete(vehicle_loc.x, vehicle_loc.y):
                 print(f"{controller_name.upper()} lap finished.")
                 return rows, positions_x, positions_y, metrics, False
     finally:

@@ -457,11 +457,11 @@ def compare_main():
                 vehicle_bp,
                 spawn_point,
                 route_trace,
+                trajectory,
                 args,
                 display,
                 DISPLAY_WIDTH,
                 DISPLAY_HEIGHT,
-                trajectory,
             )
             all_rows.extend(rows)
             trajectories[controller_name] = (xs, ys)
