@@ -21,8 +21,13 @@ consistent basis.
   heading error, and error growth rate.
 - Limit speed before curve entry with configurable entry-curvature thresholds.
 - Simulate perception-quality inputs with noise, delay, dropout, and smoothing.
+- Select CARLA maps with `--map-name auto`, `--map-name current`, or explicit
+  Town maps including Town01-Town05 and Town10HD variants. Auto mode considers
+  target speed, route shape, and the route length that each map can support.
 - Generate shaped routes including `true_straight`, `straight`,
   `gentle_curve`, `s_curve`, and `curvy`.
+- Select the legacy or constrained Frenet reference planner with
+  `--planner-mode`; each PID/LQR/MPC run replays one frozen, hashed trajectory.
 - Save CSV metrics, trajectory plots, JSON run configuration, and a
   human-readable Chinese experiment summary for each run.
 
@@ -61,6 +66,24 @@ Example adaptive high-speed comparison:
 .\scripts\run_my_control.ps1 --speed-planner-mode adaptive --target-speed 120 --route-shape s_curve --controllers lqr pid mpc
 ```
 
+Example with an explicit map:
+
+```powershell
+.\scripts\run_my_control.ps1 --map-name Town10HD --target-speed 100 --route-shape gentle_curve --controllers lqr pid mpc
+```
+
+Strict opt-in Frenet comparison and paired planner matrix:
+
+```powershell
+.\scripts\run_my_control.ps1 --planner-mode frenet --speed-planner-limit-profile global --controllers lqr pid mpc
+powershell -ExecutionPolicy Bypass -File .\scripts\run_test_matrix.ps1 -ScenarioSet stability -PlannerMode both
+```
+
+The default remains `--planner-mode legacy` until both CARLA smoke and full
+paired stability gates pass. Every run saves `reference_trajectory.json`; its
+hash is recorded in step logs, summaries, and run configuration so controller
+comparisons can verify that the reference geometry was identical.
+
 ### Project layout
 
 ```text
@@ -68,7 +91,7 @@ PythonAPI/my_control_project/
 +-- run_my_control.py          # Argument parsing and comparison entry point
 +-- scripts/run_my_control.ps1 # Windows/Conda/PYTHONPATH launcher
 +-- control/                   # LQR, PID, MPC, and longitudinal control
-+-- Speed_Planing/             # Dynamic target-speed planner
++-- speed_planning/            # Dynamic target-speed planner
 +-- road_planning/             # Route generation and tracking geometry
 +-- error_providers/           # Ground-truth and perception-like error inputs
 +-- experiment/                # Runtime loop, metrics, logging, summaries
@@ -108,6 +131,8 @@ LQR、PID 和 MPC 控制器的路径跟踪、速度控制、转向平顺性和�
 - 在同一次实验中对比 LQR、PID、MPC 控制器。
 - 使用 `--speed-planner-mode off` 运行固定目标速度的纯控制器对比。
 - 使用 `--speed-planner-mode adaptive` 运行带自适应速度规划的高速综合实验。
+- 使用 `--planner-mode legacy|frenet` 选择参考轨迹规划器；同次实验的 PID、LQR、MPC
+  共享一条预先冻结并校验哈希的轨迹。
 - 根据前方路线曲率、横向偏差、航向偏差和误差增长率动态调整目标速度。
 - 在检测到弯道入口时提前限速，降低高速入弯风险。
 - 支持感知误差模拟：噪声、延迟、丢帧和平滑。
@@ -143,6 +168,17 @@ cd D:\WindowsNoEditor\PythonAPI\my_control_project
 ```powershell
 .\scripts\run_my_control.ps1 --speed-planner-mode adaptive --target-speed 120 --route-shape s_curve --controllers lqr pid mpc
 ```
+
+严格的 Frenet 对比与成对矩阵：
+
+```powershell
+.\scripts\run_my_control.ps1 --planner-mode frenet --speed-planner-limit-profile global --controllers lqr pid mpc
+powershell -ExecutionPolicy Bypass -File .\scripts\run_test_matrix.ps1 -ScenarioSet stability -PlannerMode both
+```
+
+在 CARLA 冒烟与完整稳定性门槛全部通过前，默认规划器保持为 `legacy`。
+每次运行都会保存 `reference_trajectory.json`，并在步日志、摘要和运行配置中记录哈希，
+用于证明控制器对比使用了完全相同的参考几何。
 
 ### 项目结构
 
