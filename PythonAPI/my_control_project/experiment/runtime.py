@@ -9,7 +9,11 @@ import pygame
 from control import create_tracking_controller
 from error_providers import create_error_provider
 from project_config import CONTROLLER_SPEED_LIMIT_PROFILES, CONTROL_DT, arg_value
-from road_planning.frenet_planner import FrenetPlannerConfig, plan_frenet_reference
+from road_planning.frenet_planner import (
+    FrenetPlannerConfig,
+    FrenetPlanningFailure,
+    plan_frenet_reference,
+)
 from road_planning.reference_path import ReferencePathConfig, build_legacy_reference_trajectory
 from road_planning.reference_tracker import ReferenceTracker, ReferenceTrackingFailure
 from road_planning.route_planner import build_shaped_route
@@ -388,7 +392,37 @@ def resolve_route_setup(world, args, clamp_spawn_index, rng):
     route_features["raw_route_waypoints"] = len(route_trace)
     route_features["raw_route_length"] = route_features.get("length", 0.0)
 
-    if arg_value(args, "planner_mode") == "frenet":
+    requested_mode = arg_value(args, "planner_mode")
+    fallback_policy = arg_value(args, "planner_fallback")
+    planner_audit = {
+        "planner_mode_requested": requested_mode,
+        "planner_mode_resolved": requested_mode,
+        "planner_fallback_policy": fallback_policy,
+        "planner_fallback_used": False,
+        "planner_fallback_code": "",
+        "planner_fallback_message": "",
+        "planner_fallback_rejection_counts": {},
+    }
+
+    def build_legacy():
+        legacy_config = ReferencePathConfig(
+            sample_spacing_m=arg_value(args, "reference_sample_spacing") or args.route_resolution,
+            smoothing_window=arg_value(args, "reference_smoothing_window"),
+            lane_margin_m=arg_value(args, "reference_lane_margin"),
+            max_centerline_offset_m=arg_value(args, "reference_max_centerline_offset"),
+        )
+        legacy_metadata = {
+            "planner_mode": "legacy",
+            "planner_version": 1,
+            "target_speed_kmh": float(arg_value(args, "target_speed")),
+        }
+        return build_legacy_reference_trajectory(
+            topology_route,
+            legacy_config,
+            legacy_metadata,
+        )
+
+    if requested_mode == "frenet":
         planner_config = FrenetPlannerConfig(
             output_spacing_m=arg_value(args, "reference_sample_spacing") or args.route_resolution,
             validation_spacing_m=arg_value(args, "planner_validation_spacing"),
@@ -402,33 +436,31 @@ def resolve_route_setup(world, args, clamp_spawn_index, rng):
             max_lateral_accel_mps2=arg_value(args, "planner_max_lateral_accel"),
             max_lateral_jerk_mps3=arg_value(args, "planner_max_lateral_jerk"),
         )
-        trajectory, planner_features = plan_frenet_reference(
-            topology_route,
-            route_features,
-            arg_value(args, "target_speed"),
-            planner_config,
-        )
-        reference_trace = trajectory.to_route_trace()
+        try:
+            trajectory, planner_features = plan_frenet_reference(
+                topology_route,
+                route_features,
+                arg_value(args, "target_speed"),
+                planner_config,
+            )
+            reference_trace = trajectory.to_route_trace()
+        except FrenetPlanningFailure as exc:
+            if fallback_policy != "legacy":
+                raise
+            trajectory, reference_trace, planner_features = build_legacy()
+            planner_audit.update(
+                planner_mode_resolved="legacy",
+                planner_fallback_used=True,
+                planner_fallback_code=exc.code,
+                planner_fallback_message=str(exc),
+                planner_fallback_rejection_counts=dict(exc.rejection_counts),
+            )
     else:
-        legacy_config = ReferencePathConfig(
-            sample_spacing_m=arg_value(args, "reference_sample_spacing") or args.route_resolution,
-            smoothing_window=arg_value(args, "reference_smoothing_window"),
-            lane_margin_m=arg_value(args, "reference_lane_margin"),
-            max_centerline_offset_m=arg_value(args, "reference_max_centerline_offset"),
-        )
-        legacy_metadata = {
-            "planner_mode": "legacy",
-            "planner_version": 1,
-            "target_speed_kmh": float(arg_value(args, "target_speed")),
-        }
-        trajectory, reference_trace, planner_features = build_legacy_reference_trajectory(
-            topology_route,
-            legacy_config,
-            legacy_metadata,
-        )
+        trajectory, reference_trace, planner_features = build_legacy()
 
     route_features.update(planner_features)
-    route_features["planner_mode"] = arg_value(args, "planner_mode")
+    route_features.update(planner_audit)
+    route_features["planner_mode"] = route_features["planner_mode_resolved"]
     route_features["planner_version"] = int(
         dict(getattr(trajectory, "metadata", {}) or {}).get("planner_version", 1)
     )

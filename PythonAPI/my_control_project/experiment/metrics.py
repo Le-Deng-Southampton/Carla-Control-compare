@@ -88,6 +88,13 @@ SUMMARY_METRIC_FIELDS = [
 
 PLANNER_SUMMARY_FIELDS = [
     "planner_mode",
+    "planner_mode_requested",
+    "planner_mode_resolved",
+    "planner_fallback_policy",
+    "planner_fallback_used",
+    "planner_fallback_code",
+    "planner_fallback_message",
+    "planner_fallback_rejection_counts",
     "planner_version",
     "trajectory_hash",
     "planning_duration_s",
@@ -216,7 +223,30 @@ def build_summary(controller_name, spawn_index, route_trace, args, metrics, rout
         "max_planned_speed_kmh": max(target_speed or [0.0]) * 3.6,
         **stability,
         **{f"speed_plan_reason_{reason}_count": reason_counts.get(reason, 0) for reason in SPEED_PLAN_REASONS},
-        "planner_mode": route_features.get("planner_mode", getattr(args, "planner_mode", "legacy")),
+        "planner_mode": route_features.get(
+            "planner_mode_resolved",
+            route_features.get("planner_mode", getattr(args, "planner_mode", "legacy")),
+        ),
+        "planner_mode_requested": route_features.get(
+            "planner_mode_requested",
+            getattr(args, "planner_mode", "legacy"),
+        ),
+        "planner_mode_resolved": route_features.get(
+            "planner_mode_resolved",
+            route_features.get("planner_mode", getattr(args, "planner_mode", "legacy")),
+        ),
+        "planner_fallback_policy": route_features.get(
+            "planner_fallback_policy",
+            getattr(args, "planner_fallback", "legacy"),
+        ),
+        "planner_fallback_used": bool(route_features.get("planner_fallback_used", False)),
+        "planner_fallback_code": route_features.get("planner_fallback_code", ""),
+        "planner_fallback_message": route_features.get("planner_fallback_message", ""),
+        "planner_fallback_rejection_counts": json.dumps(
+            route_features.get("planner_fallback_rejection_counts", {}),
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
         "planner_version": route_features.get("planner_version", 1),
         "trajectory_hash": route_features.get("trajectory_hash", ""),
         "planning_duration_s": route_features.get("planning_duration_s", 0.0),

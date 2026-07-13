@@ -58,13 +58,14 @@ class RunArgsTest(unittest.TestCase):
         install_runtime_stubs()
         sys.modules.pop("run_my_control", None)
 
-    def test_planner_and_tracker_cli_defaults_are_versioned_and_legacy_safe(self):
+    def test_planner_and_tracker_cli_defaults_enable_safe_frenet_fallback(self):
         run_my_control = importlib.import_module("run_my_control")
 
         with mock.patch.object(sys, "argv", ["run_my_control.py"]):
             args = run_my_control.parse_args()
 
-        self.assertEqual(args.planner_mode, "legacy")
+        self.assertEqual(args.planner_mode, "frenet")
+        self.assertEqual(args.planner_fallback, "legacy")
         self.assertEqual(args.planner_validation_spacing, 0.25)
         self.assertEqual(args.planner_vehicle_half_width, 1.05)
         self.assertEqual(args.planner_lane_margin, 0.35)
@@ -78,6 +79,18 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.planner_max_lateral_jerk, 10.0)
         self.assertEqual(args.tracker_max_rollback, 2.0)
         self.assertEqual(args.tracker_hold_steps, 3)
+
+    def test_frenet_strict_policy_can_disable_fallback(self):
+        run_my_control = importlib.import_module("run_my_control")
+
+        with mock.patch.object(
+            sys,
+            "argv",
+            ["run_my_control.py", "--planner-mode", "frenet", "--planner-fallback", "error"],
+        ):
+            args = run_my_control.parse_args()
+
+        self.assertEqual(args.planner_fallback, "error")
 
     def test_frenet_planner_can_be_selected_without_changing_strict_speed_limits(self):
         run_my_control = importlib.import_module("run_my_control")
@@ -116,6 +129,13 @@ class RunArgsTest(unittest.TestCase):
             "total_abs_turn": 0.0,
             "turn_segments": 0,
             "planning_duration_s": 0.125,
+            "planner_mode_requested": "frenet",
+            "planner_mode_resolved": "legacy",
+            "planner_fallback_policy": "legacy",
+            "planner_fallback_used": True,
+            "planner_fallback_code": "no_feasible_candidate",
+            "planner_fallback_message": "No feasible Frenet trajectory.",
+            "planner_fallback_rejection_counts": {"curvature_rate": 21},
         }
         destination = types.SimpleNamespace(x=20.0, y=0.0, z=0.0)
 
@@ -130,7 +150,13 @@ class RunArgsTest(unittest.TestCase):
             trajectory,
         )
 
-        self.assertEqual(config["planner"]["mode"], "frenet")
+        self.assertEqual(config["planner"]["mode"], "legacy")
+        self.assertEqual(config["planner"]["requested_mode"], "frenet")
+        self.assertEqual(config["planner"]["resolved_mode"], "legacy")
+        self.assertEqual(config["planner"]["fallback_policy"], "legacy")
+        self.assertTrue(config["planner"]["fallback_used"])
+        self.assertEqual(config["planner"]["fallback_code"], "no_feasible_candidate")
+        self.assertEqual(config["planner"]["fallback_rejection_counts"], {"curvature_rate": 21})
         self.assertEqual(config["planner"]["version"], 1)
         self.assertEqual(config["planner"]["trajectory_hash"], "frozen-hash")
         self.assertEqual(config["planner"]["planning_duration_s"], 0.125)
@@ -174,7 +200,7 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.mpc_q_y, 14.0)
         self.assertEqual(args.mpc_q_psi, 22.0)
         self.assertEqual(args.mpc_r_steer, 1.0)
-        self.assertEqual(args.mpc_r_steer_rate, 35.2)
+        self.assertEqual(args.mpc_r_steer_rate, 0.9)
         self.assertEqual(args.mpc_max_steer, 0.65)
         self.assertEqual(args.mpc_max_steer_rate, 0.08)
         self.assertEqual(args.mpc_curvature_step_limit, 0.02)
@@ -187,7 +213,7 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.mpc_derivative_alpha, 0.25)
         self.assertEqual(args.mpc_event_trigger_curvature, 0.008)
         self.assertEqual(args.mpc_curvature_filter_alpha, 0.20)
-        self.assertEqual(args.mpc_curvature_feedforward_gain, 0.55)
+        self.assertEqual(args.mpc_curvature_feedforward_gain, 1.0)
         self.assertFalse(args.mpc_small_error_steer_deadband_enabled)
         self.assertEqual(args.mpc_small_error_lateral_threshold, 0.08)
         self.assertEqual(args.mpc_small_error_heading_threshold, 0.8)

@@ -312,8 +312,23 @@ def _route_config(args, route_trace, route_features):
 
 def _planner_run_config(args, route_features, trajectory):
     metadata = dict(getattr(trajectory, "metadata", {}) or {})
+    requested_mode = route_features.get("planner_mode_requested", args.planner_mode)
+    resolved_mode = route_features.get("planner_mode_resolved", args.planner_mode)
     return {
-        "mode": args.planner_mode,
+        "mode": resolved_mode,
+        "requested_mode": requested_mode,
+        "resolved_mode": resolved_mode,
+        "fallback_policy": route_features.get(
+            "planner_fallback_policy",
+            getattr(args, "planner_fallback", "legacy"),
+        ),
+        "fallback_used": bool(route_features.get("planner_fallback_used", False)),
+        "fallback_code": route_features.get("planner_fallback_code", ""),
+        "fallback_message": route_features.get("planner_fallback_message", ""),
+        "fallback_rejection_counts": route_features.get(
+            "planner_fallback_rejection_counts",
+            {},
+        ),
         "version": int(metadata.get("planner_version", 1)),
         "trajectory_hash": trajectory.content_hash(),
         "planning_duration_s": float(route_features.get("planning_duration_s", 0.0)),

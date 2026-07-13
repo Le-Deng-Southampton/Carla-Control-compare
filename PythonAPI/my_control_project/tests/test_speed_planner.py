@@ -46,6 +46,7 @@ for module_name in ("experiment", "experiment.runtime", "error_providers"):
     sys.modules.pop(module_name, None)
 
 from speed_planning.speed_planner import CurvatureSpeedPlanner, SpeedPlannerConfig
+from road_planning.frenet_planner import FrenetPlanningFailure
 from experiment.metrics import SPEED_PLAN_REASONS, build_experiment_metadata
 from experiment.runtime import (
     SimpleHUD,
@@ -71,7 +72,7 @@ else:
     sys.modules["road_planning.route_planner"] = _previous_route_planner
 
 
-def _planner_selection_fixture(planner_mode):
+def _planner_selection_fixture(planner_mode, planner_fallback="legacy"):
     def waypoint(x_m):
         location = SimpleNamespace(x=float(x_m), y=0.0, z=0.0)
         return SimpleNamespace(
@@ -103,6 +104,7 @@ def _planner_selection_fixture(planner_mode):
         route_length_tolerance=0.05,
         target_speed=70.0,
         planner_mode=planner_mode,
+        planner_fallback=planner_fallback,
         planner_validation_spacing=0.25,
         planner_vehicle_half_width=1.05,
         planner_lane_margin=0.35,
@@ -162,6 +164,69 @@ class PlannerSelectionTest(unittest.TestCase):
         planner_config = frenet.call_args.args[3]
         self.assertEqual(planner_config.lateral_beam_width, 64)
         self.assertNotIn("controller", repr(frenet.call_args).lower())
+
+    def test_expected_frenet_failure_falls_back_to_legacy_with_audit_metadata(self):
+        world, args, topology_route, route_features = _planner_selection_fixture("frenet")
+        trajectory = SimpleNamespace(content_hash=lambda: "legacy-hash", metadata={"planner_version": 1})
+        reference_trace = list(topology_route)
+        failure = FrenetPlanningFailure(
+            "no_feasible_candidate",
+            {"curvature_rate": 21},
+            "No feasible Frenet trajectory.",
+        )
+
+        with mock.patch.object(runtime_module, "build_shaped_route", return_value=(topology_route, dict(route_features))), \
+                mock.patch.object(runtime_module, "plan_frenet_reference", side_effect=failure), \
+                mock.patch.object(
+                    runtime_module,
+                    "build_legacy_reference_trajectory",
+                    return_value=(trajectory, reference_trace, {"planner_mode": "legacy"}),
+                ) as legacy:
+            result = resolve_route_setup(world, args, lambda index, points: index, mock.Mock())
+
+        resolved_features = result[5]
+        legacy.assert_called_once()
+        self.assertIs(result[-1], trajectory)
+        self.assertEqual(resolved_features["planner_mode_requested"], "frenet")
+        self.assertEqual(resolved_features["planner_mode_resolved"], "legacy")
+        self.assertEqual(resolved_features["planner_mode"], "legacy")
+        self.assertTrue(resolved_features["planner_fallback_used"])
+        self.assertEqual(resolved_features["planner_fallback_code"], "no_feasible_candidate")
+        self.assertEqual(
+            resolved_features["planner_fallback_rejection_counts"],
+            {"curvature_rate": 21},
+        )
+
+    def test_strict_frenet_failure_propagates_without_legacy_fallback(self):
+        world, args, topology_route, route_features = _planner_selection_fixture(
+            "frenet",
+            planner_fallback="error",
+        )
+        failure = FrenetPlanningFailure(
+            "no_feasible_candidate",
+            {"curvature_rate": 21},
+            "No feasible Frenet trajectory.",
+        )
+
+        with mock.patch.object(runtime_module, "build_shaped_route", return_value=(topology_route, dict(route_features))), \
+                mock.patch.object(runtime_module, "plan_frenet_reference", side_effect=failure), \
+                mock.patch.object(runtime_module, "build_legacy_reference_trajectory") as legacy:
+            with self.assertRaises(FrenetPlanningFailure) as raised:
+                resolve_route_setup(world, args, lambda index, points: index, mock.Mock())
+
+        self.assertIs(raised.exception, failure)
+        legacy.assert_not_called()
+
+    def test_unexpected_frenet_exception_never_triggers_fallback(self):
+        world, args, topology_route, route_features = _planner_selection_fixture("frenet")
+
+        with mock.patch.object(runtime_module, "build_shaped_route", return_value=(topology_route, dict(route_features))), \
+                mock.patch.object(runtime_module, "plan_frenet_reference", side_effect=RuntimeError("programming defect")), \
+                mock.patch.object(runtime_module, "build_legacy_reference_trajectory") as legacy:
+            with self.assertRaisesRegex(RuntimeError, "programming defect"):
+                resolve_route_setup(world, args, lambda index, points: index, mock.Mock())
+
+        legacy.assert_not_called()
 
 
 class CurvatureSpeedPlannerTest(unittest.TestCase):
@@ -449,6 +514,13 @@ class RuntimeSpeedPlanningTest(unittest.TestCase):
         ):
             self.assertIn(field, LOG_HEADER)
         for field in (
+            "planner_mode_requested",
+            "planner_mode_resolved",
+            "planner_fallback_policy",
+            "planner_fallback_used",
+            "planner_fallback_code",
+            "planner_fallback_message",
+            "planner_fallback_rejection_counts",
             "planner_version",
             "trajectory_hash",
             "planning_duration_s",
