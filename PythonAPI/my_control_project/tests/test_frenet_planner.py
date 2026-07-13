@@ -45,6 +45,43 @@ def straight_route(spacing=5.0, length=100.0, lane_width=3.5):
     ]
 
 
+def constant_curvature_route(radius=50.0, length=100.0, spacing=1.0):
+    arc = np.arange(0.0, length + spacing * 0.5, spacing)
+    theta = arc / float(radius)
+    return [
+        (
+            waypoint(
+                radius * math.sin(angle),
+                radius * (1.0 - math.cos(angle)),
+                math.degrees(angle),
+                index,
+            ),
+            "LANEFOLLOW",
+        )
+        for index, angle in enumerate(theta)
+    ]
+
+
+def abrupt_curvature_route():
+    points = [
+        (value, 0.0, 0.0)
+        for value in np.arange(-30.0, 0.0, 1.0)
+    ]
+    for arc in np.arange(0.0, 20.1, 1.0):
+        angle = arc / 10.0
+        points.append(
+            (
+                10.0 * math.sin(angle),
+                10.0 * (1.0 - math.cos(angle)),
+                math.degrees(angle),
+            )
+        )
+    return [
+        (waypoint(x, y, yaw, index), "LANEFOLLOW")
+        for index, (x, y, yaw) in enumerate(points)
+    ]
+
+
 def route_features():
     return {
         "length": 100.0,
@@ -77,6 +114,29 @@ class FrenetPlannerTest(unittest.TestCase):
         self.assertEqual(len(dense.s_m), len(sparse.s_m))
         self.assertLess(float(np.max(np.abs(dense.x_m - sparse.x_m))), 0.03)
         self.assertLess(float(np.max(np.abs(dense.y_m - sparse.y_m))), 0.03)
+
+    def test_constant_curvature_route_is_not_rejected_by_dense_interpolation_aliasing(self):
+        trajectory, diagnostics = plan_frenet_reference(
+            constant_curvature_route(),
+            dict(route_features(), route_label="constant_curvature", total_abs_turn=2.0),
+            target_speed_kmh=50.0,
+        )
+
+        self.assertLessEqual(
+            diagnostics["reference_max_abs_curvature_rate"],
+            FrenetPlannerConfig().max_abs_curvature_rate_1pm2,
+        )
+        self.assertGreater(len(trajectory.s_m), 2)
+
+    def test_genuine_output_grid_curvature_rate_step_is_rejected(self):
+        with self.assertRaises(FrenetPlanningFailure) as raised:
+            plan_frenet_reference(
+                abrupt_curvature_route(),
+                dict(route_features(), length=50.0, route_label="curvature_step"),
+                target_speed_kmh=30.0,
+            )
+
+        self.assertGreater(raised.exception.rejection_counts.get("curvature_rate", 0), 0)
 
     def test_vehicle_footprint_rejects_lane_that_only_fits_center_point(self):
         with self.assertRaises(FrenetPlanningFailure) as raised:

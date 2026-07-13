@@ -215,46 +215,9 @@ def generate_lateral_candidates(centerline, config):
     return candidates[:max(int(config.candidate_cap), 1)]
 
 
-def _candidate_geometry(centerline, offset_m, spacing_m):
-    dense_s = np.arange(centerline.s_m[0], centerline.s_m[-1], max(float(spacing_m), 0.05))
-    if dense_s[-1] < centerline.s_m[-1] - 1e-9:
-        dense_s = np.append(dense_s, centerline.s_m[-1])
-    center_x = np.interp(dense_s, centerline.s_m, centerline.x_m)
-    center_y = np.interp(dense_s, centerline.s_m, centerline.y_m)
-    center_yaw = np.interp(dense_s, centerline.s_m, centerline.yaw_rad)
-    dense_offset = np.interp(dense_s, centerline.s_m, offset_m)
-    x_values = center_x - dense_offset * np.sin(center_yaw)
-    y_values = center_y + dense_offset * np.cos(center_yaw)
-    dx = np.gradient(x_values, dense_s, edge_order=1)
-    dy = np.gradient(y_values, dense_s, edge_order=1)
-    yaw_values = np.unwrap(np.arctan2(dy, dx))
-    curvature = np.gradient(yaw_values, dense_s, edge_order=1)
-    curvature_rate = np.gradient(curvature, dense_s, edge_order=1)
-    return dense_s, dense_offset, x_values, y_values, yaw_values, curvature, curvature_rate
-
-
-def _increment(rejections, reason):
-    rejections[reason] = rejections.get(reason, 0) + 1
-
-
-def _evaluate_candidate(centerline, candidate, target_speed_mps, route_features, config, rejections):
-    geometry = _candidate_geometry(centerline, candidate.offset_m, config.validation_spacing_m)
-    dense_s, dense_offset, _, _, _, dense_curvature, dense_rate = geometry
-    dense_width = np.interp(dense_s, centerline.s_m, centerline.lane_width_m)
-    footprint_left = dense_width * 0.5 - dense_offset - config.vehicle_half_width_m
-    footprint_right = dense_width * 0.5 + dense_offset - config.vehicle_half_width_m
-    if float(np.min(np.minimum(footprint_left, footprint_right))) < config.lane_margin_m - 1e-9:
-        _increment(rejections, "lane_clearance")
-        return None
-    if float(np.max(np.abs(dense_curvature))) > config.max_abs_curvature_1pm + 1e-9:
-        _increment(rejections, "curvature")
-        return None
-    if float(np.max(np.abs(dense_rate))) > config.max_abs_curvature_rate_1pm2 + 1e-9:
-        _increment(rejections, "curvature_rate")
-        return None
-
+def _candidate_output_geometry(centerline, offset_m):
     output_s = centerline.s_m
-    output_offset = candidate.offset_m
+    output_offset = np.asarray(offset_m, dtype=float)
     center_yaw = centerline.yaw_rad
     x_values = centerline.x_m - output_offset * np.sin(center_yaw)
     y_values = centerline.y_m + output_offset * np.cos(center_yaw)
@@ -263,6 +226,47 @@ def _evaluate_candidate(centerline, candidate, target_speed_mps, route_features,
     yaw_values = np.unwrap(np.arctan2(dy, dx))
     curvature = np.gradient(yaw_values, output_s, edge_order=1)
     curvature_rate = np.gradient(curvature, output_s, edge_order=1)
+    return x_values, y_values, yaw_values, curvature, curvature_rate
+
+
+def _dense_candidate_occupancy(centerline, offset_m, spacing_m):
+    dense_s = np.arange(centerline.s_m[0], centerline.s_m[-1], max(float(spacing_m), 0.05))
+    if dense_s[-1] < centerline.s_m[-1] - 1e-9:
+        dense_s = np.append(dense_s, centerline.s_m[-1])
+    dense_offset = np.interp(dense_s, centerline.s_m, offset_m)
+    dense_width = np.interp(dense_s, centerline.s_m, centerline.lane_width_m)
+    return dense_s, dense_offset, dense_width
+
+
+def _increment(rejections, reason):
+    rejections[reason] = rejections.get(reason, 0) + 1
+
+
+def _evaluate_candidate(centerline, candidate, target_speed_mps, route_features, config, rejections):
+    _, dense_offset, dense_width = _dense_candidate_occupancy(
+        centerline,
+        candidate.offset_m,
+        config.validation_spacing_m,
+    )
+    footprint_left = dense_width * 0.5 - dense_offset - config.vehicle_half_width_m
+    footprint_right = dense_width * 0.5 + dense_offset - config.vehicle_half_width_m
+    if float(np.min(np.minimum(footprint_left, footprint_right))) < config.lane_margin_m - 1e-9:
+        _increment(rejections, "lane_clearance")
+        return None
+
+    output_s = centerline.s_m
+    output_offset = candidate.offset_m
+    x_values, y_values, yaw_values, curvature, curvature_rate = _candidate_output_geometry(
+        centerline,
+        output_offset,
+    )
+    if float(np.max(np.abs(curvature))) > config.max_abs_curvature_1pm + 1e-9:
+        _increment(rejections, "curvature")
+        return None
+    if float(np.max(np.abs(curvature_rate))) > config.max_abs_curvature_rate_1pm2 + 1e-9:
+        _increment(rejections, "curvature_rate")
+        return None
+
     left_clearance = centerline.lane_width_m * 0.5 - output_offset
     right_clearance = centerline.lane_width_m * 0.5 + output_offset
     speed_cap = np.asarray([
@@ -383,5 +387,7 @@ def plan_frenet_reference(route_trace, route_features, target_speed_kmh, config=
             np.min(np.minimum(selected.left_clearance_m, selected.right_clearance_m))
             - config.vehicle_half_width_m
         ),
+        "occupancy_validation_spacing_m": float(config.validation_spacing_m),
+        "differential_validation_spacing_m": float(config.output_spacing_m),
     }
     return trajectory, diagnostics
