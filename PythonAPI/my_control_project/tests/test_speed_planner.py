@@ -435,6 +435,31 @@ class RuntimeSpeedPlanningTest(unittest.TestCase):
         self.assertIn("lqr_gain_update_reason", LOG_HEADER)
         self.assertIn("mpc_solve_mode", LOG_HEADER)
         self.assertIn("longitudinal_accel", LOG_HEADER)
+        for field in (
+            "planner_mode",
+            "trajectory_hash",
+            "reference_s_m",
+            "target_s_m",
+            "projection_segment",
+            "projection_distance_m",
+            "progress_delta_m",
+            "reference_state",
+            "reference_held",
+            "curvature_preview_s_m",
+        ):
+            self.assertIn(field, LOG_HEADER)
+        for field in (
+            "planner_version",
+            "trajectory_hash",
+            "planning_duration_s",
+            "planner_candidate_count",
+            "planner_selected_candidate_id",
+            "reference_max_abs_curvature",
+            "reference_max_abs_curvature_rate",
+            "reference_min_footprint_clearance_m",
+            "planner_rejection_counts",
+        ):
+            self.assertIn(field, SUMMARY_HEADER)
 
     def test_fixed_throttle_brake_reason_is_counted_in_summaries(self):
         self.assertIn("fixed_throttle_brake", SPEED_PLAN_REASONS)

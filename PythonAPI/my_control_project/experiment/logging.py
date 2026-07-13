@@ -4,7 +4,15 @@ import os
 
 import numpy as np
 
-from .metrics import EXPERIMENT_METADATA_HEADER, SPEED_PLAN_REASONS, build_experiment_metadata
+from project_config import STEP_CONTROLLER_PARAM_FIELDS, SUMMARY_CONTROLLER_PARAM_FIELDS, arg_values
+
+from .metrics import (
+    EXPERIMENT_METADATA_HEADER,
+    PLANNER_SUMMARY_FIELDS,
+    SPEED_PLAN_REASONS,
+    SUMMARY_METRIC_FIELDS,
+    build_experiment_metadata,
+)
 
 
 SUMMARY_TEXT_COLUMNS = [
@@ -13,53 +21,82 @@ SUMMARY_TEXT_COLUMNS = [
     "readable_controller_summary",
 ]
 
+STEP_LOG_FIELDS = [
+    "time",
+    "x",
+    "y",
+    "speed",
+    "speed_error",
+    "e_y",
+    "e_psi",
+    "abs_e_y",
+    "abs_e_psi",
+    "steer",
+    "steer_delta",
+    "raw_steer",
+    "limited_steer",
+    "steer_rate_limit",
+    "steer_rate_limited",
+    "throttle",
+    "brake",
+    "target_speed",
+    "speed_plan_risk",
+    "speed_plan_reason",
+    "controller_speed_profile",
+    "current_curvature",
+    "preview_curvature",
+    "lqr_gain_update_reason",
+    "mpc_solve_mode",
+    "mpc_cache_reused",
+    "mpc_reuse_count",
+    "mpc_curvature0",
+    "mpc_curvature_max",
+    "mpc_active_horizon",
+    "mpc_steer_limit",
+    "mpc_reference_steer0",
+    "yaw_rate",
+    "lateral_accel",
+    "longitudinal_accel",
+    "lane_clearance",
+    "lane_boundary_violation",
+    "collision_count",
+    "route_completion",
+    "route_index",
+    "closest_route_index",
+    "route_error",
+    "road_option",
+    "target_x",
+    "target_y",
+    "target_yaw",
+]
+
+REFERENCE_STEP_FIELDS = [
+    "planner_mode",
+    "trajectory_hash",
+    "reference_s_m",
+    "target_s_m",
+    "projection_segment",
+    "projection_distance_m",
+    "progress_delta_m",
+    "reference_state",
+    "reference_held",
+    "curvature_preview_s_m",
+]
+
 
 LOG_HEADER = [
     *EXPERIMENT_METADATA_HEADER,
-    "time", "x", "y", "speed", "speed_error", "e_y", "e_psi", "abs_e_y", "abs_e_psi",
-    "steer", "steer_delta", "throttle", "brake", "target_speed", "speed_plan_risk", "speed_plan_reason",
-    "route_index", "closest_route_index", "route_error", "road_option",
-    "target_x", "target_y", "target_yaw",
-    "lqr_q_ey", "lqr_q_ey_dot", "lqr_q_epsi", "lqr_q_epsi_dot", "lqr_r",
-    "lqr_kp_long", "lqr_ki_long", "lqr_kd_long",
-    "lqr_max_steer", "lqr_max_steer_rate",
-    "lqr_derivative_alpha", "lqr_curvature_alpha", "lqr_feedforward_gain",
-    "lqr_turn_in_rate_scale", "lqr_turn_in_guard_lateral_error", "lqr_turn_in_guard_heading_error",
-    "lqr_turn_in_guard_max_curvature",
-    "lqr_inside_error_feedforward_start", "lqr_inside_error_feedforward_full",
-    "lqr_inside_error_feedforward_min_scale",
-    "mpc_horizon", "mpc_q_y", "mpc_q_psi", "mpc_r_steer", "mpc_r_steer_rate",
-    "mpc_kp_long", "mpc_ki_long", "mpc_kd_long",
-    "mpc_max_steer", "mpc_max_steer_rate",
-    "pid_lat_kp", "pid_lat_ki", "pid_lat_kd",
-    "pid_long_kp", "pid_long_ki", "pid_long_kd",
-    "pid_max_throttle", "pid_max_brake",
+    *STEP_LOG_FIELDS,
+    *STEP_CONTROLLER_PARAM_FIELDS,
+    *REFERENCE_STEP_FIELDS,
 ]
 
 
 SUMMARY_HEADER = [
     *EXPERIMENT_METADATA_HEADER,
-    "spawn_index", "route_waypoints", "target_speed_kmh",
-    "route_total_abs_turn_rad", "route_total_abs_turn_deg",
-    "route_mean_abs_curvature", "route_max_abs_curvature",
-    "mean_abs_e_y", "rms_e_y", "max_abs_e_y",
-    "mean_abs_e_psi_deg", "rms_e_psi_deg", "mean_abs_speed_error",
-    "mean_abs_steer_delta", "max_abs_steer_delta",
-    "mean_planned_speed_kmh", "min_planned_speed_kmh", "max_planned_speed_kmh",
-    *[f"speed_plan_reason_{reason}_count" for reason in SPEED_PLAN_REASONS],
-    "lqr_q_ey", "lqr_q_ey_dot", "lqr_q_epsi", "lqr_q_epsi_dot", "lqr_r",
-    "lqr_max_steer", "lqr_max_steer_rate",
-    "lqr_derivative_alpha", "lqr_curvature_alpha", "lqr_feedforward_gain",
-    "lqr_turn_in_rate_scale", "lqr_turn_in_guard_lateral_error", "lqr_turn_in_guard_heading_error",
-    "lqr_turn_in_guard_max_curvature",
-    "lqr_inside_error_feedforward_start", "lqr_inside_error_feedforward_full",
-    "lqr_inside_error_feedforward_min_scale",
-    "mpc_horizon", "mpc_q_y", "mpc_q_psi", "mpc_r_steer", "mpc_r_steer_rate",
-    "mpc_kp_long", "mpc_ki_long", "mpc_kd_long",
-    "mpc_max_steer", "mpc_max_steer_rate",
-    "pid_lat_kp", "pid_lat_ki", "pid_lat_kd",
-    "pid_long_kp", "pid_long_ki", "pid_long_kd",
-    "pid_max_throttle", "pid_max_brake",
+    *SUMMARY_METRIC_FIELDS,
+    *SUMMARY_CONTROLLER_PARAM_FIELDS,
+    *PLANNER_SUMMARY_FIELDS,
     *SUMMARY_TEXT_COLUMNS,
 ]
 
@@ -107,6 +144,10 @@ def build_step_snapshot(
     tracking_errors,
     speed_plan_risk=0.0,
     speed_plan_reason="none",
+    controller_debug=None,
+    collision_count=0,
+    previous_speed=None,
+    dt=0.05,
 ):
     transform = vehicle.get_transform()
     velocity = vehicle.get_velocity()
@@ -114,6 +155,15 @@ def build_step_snapshot(
     location = transform.location
     speed_error = target_speed_ms - speed
     steer_delta = control.steer - previous_steer
+    angular_velocity = getattr(vehicle, "get_angular_velocity", None)
+    yaw_rate = np.radians(angular_velocity().z) if angular_velocity is not None else 0.0
+    lateral_accel = speed * yaw_rate
+    longitudinal_accel = 0.0
+    if previous_speed is not None and dt > 1e-9:
+        longitudinal_accel = (speed - float(previous_speed)) / float(dt)
+    lane_clearance = tracking_errors.get("lane_clearance_m", 0.0)
+    lane_boundary_violation = bool(tracking_errors.get("lane_boundary_violation", False))
+    controller_debug = controller_debug or {}
 
     return {
         "x": location.x,
@@ -123,9 +173,31 @@ def build_step_snapshot(
         "e_psi": tracking_errors["e_psi"],
         "speed_error": speed_error,
         "steer_delta": steer_delta,
+        "raw_steer": controller_debug.get("raw_steer", control.steer),
+        "limited_steer": control.steer,
+        "steer_rate_limit": controller_debug.get("steer_rate_limit", 0.0),
+        "steer_rate_limited": controller_debug.get("steer_rate_limited", False),
         "target_speed": target_speed_ms,
         "speed_plan_risk": speed_plan_risk,
         "speed_plan_reason": speed_plan_reason,
+        "controller_speed_profile": controller_debug.get("controller_speed_profile", "base"),
+        "current_curvature": controller_debug.get("current_curvature", 0.0),
+        "preview_curvature": controller_debug.get("preview_curvature", 0.0),
+        "lqr_gain_update_reason": controller_debug.get("lqr_gain_update_reason", "none"),
+        "mpc_solve_mode": controller_debug.get("mpc_solve_mode", "not_applicable"),
+        "mpc_cache_reused": controller_debug.get("mpc_cache_reused", False),
+        "mpc_reuse_count": controller_debug.get("mpc_reuse_count", 0),
+        "mpc_curvature0": controller_debug.get("mpc_curvature0", 0.0),
+        "mpc_curvature_max": controller_debug.get("mpc_curvature_max", 0.0),
+        "mpc_active_horizon": controller_debug.get("mpc_active_horizon", 0),
+        "mpc_steer_limit": controller_debug.get("mpc_steer_limit", 0.0),
+        "mpc_reference_steer0": controller_debug.get("mpc_reference_steer0", 0.0),
+        "yaw_rate": yaw_rate,
+        "lateral_accel": lateral_accel,
+        "longitudinal_accel": longitudinal_accel,
+        "lane_clearance": lane_clearance,
+        "lane_boundary_violation": lane_boundary_violation,
+        "collision_count": collision_count,
         "target_x": tracking_errors["target_x"],
         "target_y": tracking_errors["target_y"],
         "target_yaw": tracking_errors["target_yaw"],
@@ -133,80 +205,55 @@ def build_step_snapshot(
 
 
 def append_step_data(rows, positions_x, positions_y, metrics, controller_name, args, route_state, snapshot, control, sim_time):
-    route_index, closest_route_index, route_error, road_option = route_state
+    route_index, closest_route_index, route_error, road_option, route_length = route_state
+    route_completion = route_index / max(route_length - 1, 1)
     metrics["abs_ey"].append(abs(snapshot["e_y"]))
     metrics["abs_epsi"].append(abs(snapshot["e_psi"]))
     metrics["abs_speed_error"].append(abs(snapshot["speed_error"]))
     metrics["steer_delta"].append(abs(snapshot["steer_delta"]))
     metrics["target_speed"].append(snapshot["target_speed"])
+    metrics["abs_yaw_rate"].append(abs(snapshot["yaw_rate"]))
+    metrics["abs_lateral_accel"].append(abs(snapshot["lateral_accel"]))
+    metrics["time"].append(sim_time)
+    metrics["speed"].append(snapshot["speed"])
+    metrics["speed_error"].append(snapshot["speed_error"])
+    metrics["steer_delta_signed"].append(snapshot["steer_delta"])
+    metrics["steer_rate_limit"].append(snapshot["steer_rate_limit"])
+    metrics["steer_rate_limited"].append(bool(snapshot["steer_rate_limited"]))
+    metrics["lateral_accel_signed"].append(snapshot["lateral_accel"])
+    metrics["longitudinal_accel"].append(snapshot["longitudinal_accel"])
+    metrics["throttle"].append(control.throttle)
+    metrics["brake"].append(control.brake)
+    metrics["lane_clearance"].append(snapshot["lane_clearance"])
+    metrics["route_completion"].append(route_completion)
+    metrics["collision_count"] = max(metrics.get("collision_count", 0), int(snapshot["collision_count"]))
+    if snapshot["lane_boundary_violation"]:
+        metrics["lane_boundary_violation_count"] = metrics.get("lane_boundary_violation_count", 0) + 1
     reason_counts = metrics["speed_plan_reason_counts"]
     reason = snapshot["speed_plan_reason"]
     reason_counts[reason] = reason_counts.get(reason, 0) + 1
     positions_x.append(snapshot["x"])
     positions_y.append(snapshot["y"])
 
-    rows.append(build_experiment_metadata(controller_name, args) + [
-        sim_time,
-        snapshot["x"],
-        snapshot["y"],
-        snapshot["speed"],
-        snapshot["speed_error"],
-        snapshot["e_y"],
-        snapshot["e_psi"],
-        abs(snapshot["e_y"]),
-        abs(snapshot["e_psi"]),
-        control.steer,
-        snapshot["steer_delta"],
-        control.throttle,
-        control.brake,
-        snapshot["target_speed"],
-        snapshot["speed_plan_risk"],
-        snapshot["speed_plan_reason"],
-        route_index,
-        closest_route_index,
-        route_error,
-        str(road_option),
-        snapshot["target_x"],
-        snapshot["target_y"],
-        snapshot["target_yaw"],
-        args.lqr_q_ey,
-        args.lqr_q_ey_dot,
-        args.lqr_q_epsi,
-        args.lqr_q_epsi_dot,
-        args.lqr_r,
-        args.lqr_kp_long,
-        args.lqr_ki_long,
-        args.lqr_kd_long,
-        args.lqr_max_steer,
-        args.lqr_max_steer_rate,
-        args.lqr_derivative_alpha,
-        args.lqr_curvature_alpha,
-        args.lqr_feedforward_gain,
-        args.lqr_turn_in_rate_scale,
-        args.lqr_turn_in_guard_lateral_error,
-        args.lqr_turn_in_guard_heading_error,
-        args.lqr_turn_in_guard_max_curvature,
-        args.lqr_inside_error_feedforward_start,
-        args.lqr_inside_error_feedforward_full,
-        args.lqr_inside_error_feedforward_min_scale,
-        args.mpc_horizon,
-        args.mpc_q_y,
-        args.mpc_q_psi,
-        args.mpc_r_steer,
-        args.mpc_r_steer_rate,
-        args.mpc_kp_long,
-        args.mpc_ki_long,
-        args.mpc_kd_long,
-        args.mpc_max_steer,
-        args.mpc_max_steer_rate,
-        args.pid_lat_kp,
-        args.pid_lat_ki,
-        args.pid_lat_kd,
-        args.pid_long_kp,
-        args.pid_long_ki,
-        args.pid_long_kd,
-        args.pid_max_throttle,
-        args.pid_max_brake,
+    values = {
+        **snapshot,
+        "time": sim_time,
+        "abs_e_y": abs(snapshot["e_y"]),
+        "abs_e_psi": abs(snapshot["e_psi"]),
+        "steer": control.steer,
+        "throttle": control.throttle,
+        "brake": control.brake,
+        "route_completion": route_completion,
+        "route_index": route_index,
+        "closest_route_index": closest_route_index,
+        "route_error": route_error,
+        "road_option": str(road_option),
+    }
+    rows.append([
+        *build_experiment_metadata(controller_name, args),
+        *[values[field] for field in STEP_LOG_FIELDS],
+        *arg_values(args, STEP_CONTROLLER_PARAM_FIELDS),
+        *[values.get(field, "") for field in REFERENCE_STEP_FIELDS],
     ])
 
 
@@ -335,11 +382,15 @@ def _dominant_speed_reasons(record):
 
 def _build_conditions_text(first_record, run_config):
     route_config = run_config.get("route", {}) if isinstance(run_config, dict) else {}
+    reference_config = route_config.get("reference_path", {}) if isinstance(route_config, dict) else {}
+    scene_coverage = route_config.get("scene_coverage", {}) if isinstance(route_config, dict) else {}
+    speed_config = run_config.get("speed_planner", {}) if isinstance(run_config, dict) else {}
     length_m = route_config.get("length_m", first_record.get("route_min_length_m"))
     route_label = route_config.get("route_label", first_record.get("route_label"))
     total_turn = route_config.get("total_abs_turn_deg", first_record.get("route_total_abs_turn_deg"))
     mean_curvature = route_config.get("mean_abs_curvature", first_record.get("route_mean_abs_curvature"))
     max_curvature = route_config.get("max_abs_curvature", first_record.get("route_max_abs_curvature"))
+    limit_profile = speed_config.get("limit_profile", first_record.get("speed_planner_limit_profile"))
     seed = run_config.get("seed", "") if isinstance(run_config, dict) else ""
     destination_index = run_config.get("destination_index", "") if isinstance(run_config, dict) else ""
     return (
@@ -350,8 +401,15 @@ def _build_conditions_text(first_record, run_config):
         f"mean curvature {_format_float(mean_curvature, 4)}; "
         f"max curvature {_format_float(max_curvature, 4)}; "
         f"difficulty {_route_difficulty(first_record)}; "
+        f"reference validation {reference_config.get('validation_passed', first_record.get('reference_validation_passed', ''))}; "
+        f"minimum lane clearance {_format_float(reference_config.get('min_lane_clearance_m', first_record.get('reference_min_lane_clearance_m')), 2, ' m')}; "
+        f"scene coverage straight {_format_float(scene_coverage.get('straight_m', first_record.get('scene_straight_m')), 1, ' m')}, "
+        f"gentle curve {_format_float(scene_coverage.get('gentle_curve_m', first_record.get('scene_gentle_curve_m')), 1, ' m')}, "
+        f"moderate curve {_format_float(scene_coverage.get('moderate_curve_m', first_record.get('scene_moderate_curve_m')), 1, ' m')}, "
+        f"tight curve {_format_float(scene_coverage.get('tight_curve_m', first_record.get('scene_tight_curve_m')), 1, ' m')}; "
         f"target speed {_format_float(first_record.get('target_speed_kmh'), 1, ' km/h')}; "
         f"speed mode {_speed_planner_label(first_record.get('speed_planner_mode'))}; "
+        f"speed-limit profile {limit_profile}; "
         f"error source {_error_provider_label(first_record.get('error_provider'))}; "
         f"perception setup: lateral noise {_format_float(first_record.get('noise_lateral_std'), 3, ' m')}, "
         f"heading noise {_format_float(first_record.get('noise_heading_std_deg'), 2, ' deg')}, "
@@ -395,17 +453,23 @@ def _build_result_text(scored_records, records):
 
 
 def _build_controller_text(record):
-    return (
+    text = (
         f"{_controller_label(record.get('controller'))}: "
         f"mean lateral error {_format_float(record.get('mean_abs_e_y'), 3, ' m')}; "
         f"max lateral error {_format_float(record.get('max_abs_e_y'), 3, ' m')}; "
         f"mean heading error {_format_float(record.get('mean_abs_e_psi_deg'), 2, ' deg')}; "
         f"mean speed error {_format_float(record.get('mean_abs_speed_error'), 3, ' m/s')}; "
         f"mean steering change {_format_float(record.get('mean_abs_steer_delta'), 4)}; "
+        f"route completion {_format_float(record.get('route_completion_pct'), 1, '%')}; "
+        f"collisions {record.get('collision_count')}; "
+        f"lane-boundary violations {record.get('lane_boundary_violation_count')}; "
+        f"minimum lane clearance {_format_float(record.get('min_lane_clearance_m'), 2, ' m')}; "
+        f"peak lateral acceleration {_format_float(record.get('max_abs_lateral_accel'), 2, ' m/s^2')}; "
         f"planned speed range {_format_float(record.get('min_planned_speed_kmh'), 1, ' km/h')} to "
         f"{_format_float(record.get('max_planned_speed_kmh'), 1, ' km/h')}; "
         f"speed-planner triggers: {_dominant_speed_reasons(record)}"
     )
+    return text
 
 
 def build_human_summary(summaries, run_config):

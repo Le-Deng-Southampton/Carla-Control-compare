@@ -1,5 +1,6 @@
 from queue import Empty, Queue
 from dataclasses import dataclass
+import json
 
 import carla
 import numpy as np
@@ -27,6 +28,7 @@ class ContinuousReferenceStep:
     projection: object
     reference_waypoint: object
     target_waypoint: object
+    target_s_m: float
     road_option: str
 
 
@@ -54,6 +56,7 @@ def build_continuous_reference_step(
         projection=projection,
         reference_waypoint=trajectory.waypoint_at(projection.s_ref_m),
         target_waypoint=trajectory.waypoint_at(target_sample.s_m),
+        target_s_m=float(target_sample.s_m),
         road_option=target_sample.road_option,
     )
 
@@ -426,6 +429,10 @@ def resolve_route_setup(world, args, clamp_spawn_index, rng):
 
     route_features.update(planner_features)
     route_features["planner_mode"] = arg_value(args, "planner_mode")
+    route_features["planner_version"] = int(
+        dict(getattr(trajectory, "metadata", {}) or {}).get("planner_version", 1)
+    )
+    route_features["trajectory_hash"] = trajectory.content_hash()
     route_features["reference_length_m"] = float(
         getattr(trajectory, "length_m", route_features.get("reference_length_m", route_features["raw_route_length"]))
     )
@@ -551,6 +558,7 @@ def run_controller_lap(
             max_rollback_m=arg_value(args, "tracker_max_rollback"),
             hold_steps=arg_value(args, "tracker_hold_steps"),
         )
+        trajectory_hash = reference_trajectory.content_hash()
         camera, image_queue = spawn_camera(world, blueprint_library, vehicle, display_width, display_height)
         hud = SimpleHUD(display_width, display_height)
         clock = pygame.time.Clock()
@@ -662,6 +670,22 @@ def run_controller_lap(
                 previous_speed=previous_speed,
                 dt=getattr(args, "control_dt", CONTROL_DT),
             )
+            preview_spacing_m = max(float(speed_ms) * 0.80, 7.0)
+            preview_distances_m = [step * preview_spacing_m for step in range(6)]
+            snapshot.update({
+                "planner_mode": arg_value(args, "planner_mode"),
+                "trajectory_hash": trajectory_hash,
+                "reference_s_m": projection.s_ref_m,
+                "target_s_m": reference_step.target_s_m,
+                "projection_segment": projection.segment_index,
+                "projection_distance_m": projection.projection_distance_m,
+                "progress_delta_m": projection.progress_delta_m,
+                "reference_state": projection.state,
+                "reference_held": projection.held,
+                "curvature_preview_s_m": json.dumps(
+                    tracker.preview_s_m(preview_distances_m), separators=(",", ":")
+                ),
+            })
             previous_steer = control.steer
             previous_speed = snapshot["speed"]
             sim_time = world.get_snapshot().timestamp.elapsed_seconds
