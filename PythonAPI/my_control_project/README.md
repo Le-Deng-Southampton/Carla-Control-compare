@@ -75,19 +75,23 @@ Integrated high-speed system comparison, with adaptive speed planning:
 .\scripts\run_my_control.ps1 --speed-planner-mode adaptive --target-speed 120 --route-shape s_curve --controllers lqr pid mpc
 ```
 
-Opt-in constrained Frenet planning with strict controller-comparison limits:
+Strict constrained Frenet planning without fallback:
 
 ```powershell
-.\scripts\run_my_control.ps1 --planner-mode frenet --speed-planner-limit-profile global --controllers lqr pid mpc
+.\scripts\run_my_control.ps1 --planner-mode frenet --planner-fallback error --speed-planner-limit-profile global --controllers lqr pid mpc
 ```
 
-`--planner-mode legacy` remains the default until the full CARLA smoke and
-stability rollout gates pass. Both planner modes build the reference before any
-controller lap. The runner writes `reference_trajectory.json`, records its
-SHA-256 hash, and checks that same in-memory trajectory immediately before each
-PID/LQR/MPC lap. Use `--speed-planner-limit-profile global` for a strict
-controller-only comparison; use the controller-specific profile only for an
-integrated system comparison.
+Ordinary runs request `--planner-mode frenet` by default and allow only expected
+`FrenetPlanningFailure` cases to use `--planner-fallback legacy`. Use
+`--planner-fallback error` for strict experiments. Both planner modes build the
+reference before any controller lap. The runner writes
+`reference_trajectory.json`, records its SHA-256 hash, and checks that same
+in-memory trajectory immediately before each PID/LQR/MPC lap. Run configuration
+and summaries distinguish requested and resolved planner modes and record any
+fallback code and rejection counts. Use `--speed-planner-limit-profile global`
+for a strict controller-only comparison; use the controller-specific profile
+only for an integrated system comparison. Curvature limits remain `0.20 1/m`
+and curvature-rate limits remain `0.020 1/m^2`; no threshold was relaxed.
 
 ## Current default behavior
 
@@ -198,7 +202,9 @@ powershell -ExecutionPolicy Bypass -File PythonAPI\my_control_project\scripts\ru
 
 The matrix writes raw and `_paired.csv` results under `log/`. Legacy and Frenet
 runs reuse the same map, seed, route shape, target speed, speed-planner mode,
-error provider, and controller, while enforcing global speed-planner limits.
+error provider, and controller, while enforcing global speed-planner limits and
+`--planner-fallback error`. The matrix rejects a row whose resolved planner does
+not match the requested strict planner.
 It exits with code 1 when a required row fails or the paired comparison finds a
 collision, lane-boundary, route-generation, or minimum-clearance regression.
 Low-speed curve cases use Town05 sharp town bends. High-speed curve cases use

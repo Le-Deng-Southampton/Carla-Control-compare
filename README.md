@@ -72,17 +72,22 @@ Example with an explicit map:
 .\scripts\run_my_control.ps1 --map-name Town10HD --target-speed 100 --route-shape gentle_curve --controllers lqr pid mpc
 ```
 
-Strict opt-in Frenet comparison and paired planner matrix:
+Strict Frenet comparison and paired planner matrix:
 
 ```powershell
-.\scripts\run_my_control.ps1 --planner-mode frenet --speed-planner-limit-profile global --controllers lqr pid mpc
+.\scripts\run_my_control.ps1 --planner-mode frenet --planner-fallback error --speed-planner-limit-profile global --controllers lqr pid mpc
 powershell -ExecutionPolicy Bypass -File .\scripts\run_test_matrix.ps1 -ScenarioSet stability -PlannerMode both
 ```
 
-The default remains `--planner-mode legacy` until both CARLA smoke and full
-paired stability gates pass. Every run saves `reference_trajectory.json`; its
-hash is recorded in step logs, summaries, and run configuration so controller
-comparisons can verify that the reference geometry was identical.
+Ordinary runs request Frenet by default and use `--planner-fallback legacy` so
+an expected planning timeout or infeasible route cannot prevent startup.
+Unexpected programming errors still propagate. Strict comparisons use
+`--planner-fallback error`, and matrix rows verify the resolved planner mode, so
+a fallback legacy result cannot be reported as a Frenet success. Every run
+saves `reference_trajectory.json`; its hash is recorded in step logs, summaries,
+and run configuration so controller comparisons can verify that the reference
+geometry was identical. The curvature and curvature-rate safety limits remain
+unchanged; smoke success establishes usability, not superior performance.
 
 ### Project layout
 
@@ -172,13 +177,16 @@ cd D:\WindowsNoEditor\PythonAPI\my_control_project
 严格的 Frenet 对比与成对矩阵：
 
 ```powershell
-.\scripts\run_my_control.ps1 --planner-mode frenet --speed-planner-limit-profile global --controllers lqr pid mpc
+.\scripts\run_my_control.ps1 --planner-mode frenet --planner-fallback error --speed-planner-limit-profile global --controllers lqr pid mpc
 powershell -ExecutionPolicy Bypass -File .\scripts\run_test_matrix.ps1 -ScenarioSet stability -PlannerMode both
 ```
 
-在 CARLA 冒烟与完整稳定性门槛全部通过前，默认规划器保持为 `legacy`。
-每次运行都会保存 `reference_trajectory.json`，并在步日志、摘要和运行配置中记录哈希，
-用于证明控制器对比使用了完全相同的参考几何。
+普通运行默认请求 Frenet，并使用 `--planner-fallback legacy`，使预期的规划超时或无可行
+轨迹不会阻止项目启动；非预期程序错误仍会直接暴露。严格对比使用
+`--planner-fallback error`，矩阵还会核对实际解析出的规划器，因此 legacy 回退结果不会被
+误记为 Frenet 成功。每次运行都会保存 `reference_trajectory.json`，并在步日志、摘要和运行
+配置中记录请求/实际规划器、回退原因和轨迹哈希。曲率与曲率率安全阈值没有放宽；冒烟
+通过只证明功能可用，不代表 Frenet 性能优于 legacy。
 
 ### 项目结构
 

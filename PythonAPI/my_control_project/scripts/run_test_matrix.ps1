@@ -183,6 +183,8 @@ function New-MatrixRecord {
         scenario = $Scenario.Name
         speed_planner_mode = $Mode
         planner_mode = $PlannerMode
+        planner_mode_requested = if ($null -ne $SummaryRow) { $SummaryRow.planner_mode_requested } else { $PlannerMode }
+        planner_mode_resolved = if ($null -ne $SummaryRow) { $SummaryRow.planner_mode_resolved } else { "" }
         error_provider = $Provider
         requested_speed_kmh = $Scenario.Speed
         requested_route_shape = $Scenario.Route
@@ -244,6 +246,7 @@ foreach ($testCase in $testCases) {
     $runArgs = @(
         "--speed-planner-mode", $caseMode,
         "--planner-mode", $casePlannerMode,
+        "--planner-fallback", "error",
         "--speed-planner-limit-profile", "global",
         "--target-speed", [string]$scenario.Speed,
         "--route-shape", $scenario.Route,
@@ -300,8 +303,14 @@ foreach ($testCase in $testCases) {
 
     foreach ($row in (Import-Csv -LiteralPath $summaryPath)) {
         $stabilityPassed = [string]$row.stability_passed -eq "True"
-        $status = if ($stabilityPassed) { "ok" } else { "stability_failed" }
-        $errorMessage = if ($stabilityPassed) { "" } else { $row.stability_fail_reasons }
+        if ($row.planner_mode_resolved -ne $casePlannerMode) {
+            $status = "planner_mismatch"
+            $errorMessage = "Resolved planner '$($row.planner_mode_resolved)' did not match requested strict planner '$casePlannerMode'."
+        }
+        else {
+            $status = if ($stabilityPassed) { "ok" } else { "stability_failed" }
+            $errorMessage = if ($stabilityPassed) { "" } else { $row.stability_fail_reasons }
+        }
         $records.Add((New-MatrixRecord -Status $status -ErrorMessage $errorMessage -Scenario $scenario -Mode $caseMode -Provider $caseProvider -PlannerMode $casePlannerMode -RunDirectory $runDir.FullName -SummaryRow $row))
     }
 
