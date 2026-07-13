@@ -44,6 +44,9 @@ __pycache__/
 # Experiment outputs
 PythonAPI/my_control_project/log/
 
+# Isolated Codex feature worktrees
+.worktrees/
+
 # Local C# launcher build output
 Tools/CarlaUE4Launcher/bin/
 Tools/CarlaUE4Launcher/obj/
