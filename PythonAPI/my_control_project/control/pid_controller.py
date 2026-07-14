@@ -3,6 +3,7 @@ import numpy as np
 from agents.navigation.controller import PIDLateralController
 
 from .base import BaseTrackingController
+from .common import resolve_preview_curvature
 from .longitudinal import PidLongitudinalController
 
 
@@ -23,9 +24,24 @@ class PidControllerAdapter(BaseTrackingController):
         max_throttle=0.45,
         max_brake=0.28,
         max_steering=0.65,
+        max_steer_rate=0.10,
+        curvature_feedforward_gain=0.90,
+        curvature_preview_horizon=10,
+        curvature_preview_blend=0.55,
+        integral_error_limit=np.radians(20.0),
+        integral_separation_lateral_error=1.4,
+        integral_separation_heading_error=np.radians(18.0),
+        speed_scheduling_enabled=True,
         longitudinal_controller=None,
     ):
         self.max_steer = max_steering
+        self.max_steer_rate = max_steer_rate
+        self.curvature_feedforward_gain = curvature_feedforward_gain
+        self.curvature_preview_blend = curvature_preview_blend
+        self.speed_scheduling_enabled = speed_scheduling_enabled
+        self.supports_curvature_sequence = True
+        self.horizon = max(int(curvature_preview_horizon), 1)
+        self.L = 2.90
         self._lat_controller = PIDLateralController(
             vehicle,
             K_P=lat_kp,
@@ -42,7 +58,27 @@ class PidControllerAdapter(BaseTrackingController):
             max_throttle=max_throttle,
             max_brake=max_brake,
         )
-        self.past_steering = vehicle.get_control().steer
+        self.past_steering = 0.0
+        self.last_speed_profile = "pid_base"
+        self.last_curvature_feedforward_scale = 1.0
+        self.last_raw_steer = 0.0
+        self.last_steer_rate_limit = 0.0
+        self.last_steer_rate_limited = False
+        self.last_current_curvature = 0.0
+        self.last_preview_curvature = 0.0
+
+    def _clear_lateral_integral(self):
+        if hasattr(self._lat_controller, "_e_buffer"):
+            self._lat_controller._e_buffer.clear()
+
+    def _steer_rate_limit(self, speed_mps):
+        if not self.speed_scheduling_enabled:
+            return max(float(self.max_steer_rate), 0.0)
+        speed_kmh = max(float(speed_mps) * 3.6, 0.0)
+        speed_points = np.array([0.0, 35.0, 55.0, 85.0, 120.0])
+        rate_points = np.array([0.080, 0.070, 0.055, 0.035, 0.025])
+        scheduled = float(np.interp(speed_kmh, speed_points, rate_points))
+        return max(min(float(self.max_steer_rate), scheduled), 0.0)
 
     def run_step(
         self,
@@ -59,17 +95,42 @@ class PidControllerAdapter(BaseTrackingController):
             speed_mps,
             target_speed_mps=planned_target_speed_mps,
         )
-        current_steering = self._lat_controller.run_step(target_waypoint)
+        current_curvature, feedforward_curvature = resolve_preview_curvature(
+            curvature,
+            blend=self.curvature_preview_blend,
+            scheduling_enabled=False,
+            preview_weight_end=0.40,
+            preview_delta=0.015,
+            max_blend=0.78,
+        )
+        self.last_curvature_feedforward_scale = 1.0
+        steer_ff = (
+            self.curvature_feedforward_gain
+            * self.last_curvature_feedforward_scale
+            * np.arctan(self.L * feedforward_curvature)
+        )
+        steer_fb = self._lat_controller.run_step(target_waypoint)
+        requested_steering = steer_fb + steer_ff
 
-        if current_steering > self.past_steering + 0.1:
-            current_steering = self.past_steering + 0.1
-        elif current_steering < self.past_steering - 0.1:
-            current_steering = self.past_steering - 0.1
+        steer_rate_limit = self._steer_rate_limit(speed_mps)
+        current_steering = float(np.clip(
+            requested_steering,
+            self.past_steering - steer_rate_limit,
+            self.past_steering + steer_rate_limit,
+        ))
 
         if current_steering >= 0:
             steering = min(self.max_steer, current_steering)
         else:
             steering = max(-self.max_steer, current_steering)
+        if abs(steering - requested_steering) > 1e-9:
+            self._clear_lateral_integral()
+
+        self.last_raw_steer = float(requested_steering)
+        self.last_steer_rate_limit = float(steer_rate_limit)
+        self.last_steer_rate_limited = abs(current_steering - requested_steering) > 1e-9
+        self.last_current_curvature = float(current_curvature)
+        self.last_preview_curvature = float(feedforward_curvature)
 
         control = carla.VehicleControl()
         control.steer = steering
@@ -82,6 +143,13 @@ class PidControllerAdapter(BaseTrackingController):
 
     def reset(self):
         self.past_steering = 0.0
+        self.last_speed_profile = "pid_base"
+        self.last_curvature_feedforward_scale = 1.0
+        self.last_raw_steer = 0.0
+        self.last_steer_rate_limit = 0.0
+        self.last_steer_rate_limited = False
+        self.last_current_curvature = 0.0
+        self.last_preview_curvature = 0.0
         self._longitudinal_controller.reset()
         if hasattr(self._lat_controller, "_e_buffer"):
             self._lat_controller._e_buffer.clear()
