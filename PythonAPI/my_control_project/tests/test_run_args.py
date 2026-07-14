@@ -190,6 +190,44 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.lqr_curvature_preview_horizon, 12)
         self.assertEqual(args.lqr_curvature_preview_blend, 0.40)
 
+    def test_pid_cli_allows_feedforward_ablation(self):
+        run_my_control = importlib.import_module("run_my_control")
+
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "run_my_control.py",
+                "--pid-max-steer",
+                "0.65",
+                "--pid-max-steer-rate",
+                "0.10",
+                "--pid-curvature-feedforward-gain",
+                "0.0",
+                "--pid-curvature-preview-horizon",
+                "10",
+                "--pid-curvature-preview-blend",
+                "0.55",
+            ],
+        ):
+            args = run_my_control.parse_args()
+
+        self.assertEqual(args.pid_max_steer, 0.65)
+        self.assertEqual(args.pid_max_steer_rate, 0.10)
+        self.assertEqual(args.pid_curvature_feedforward_gain, 0.0)
+        self.assertEqual(args.pid_curvature_preview_horizon, 10)
+        self.assertEqual(args.pid_curvature_preview_blend, 0.55)
+
+    def test_pid_cli_defaults_preserve_c0_steering_authority(self):
+        run_my_control = importlib.import_module("run_my_control")
+
+        with mock.patch.object(sys, "argv", ["run_my_control.py"]):
+            args = run_my_control.parse_args()
+
+        self.assertEqual(args.pid_max_steer, 0.65)
+        self.assertEqual(args.pid_max_steer_rate, 0.65)
+        self.assertEqual(args.pid_curvature_feedforward_gain, 0.0)
+
     def test_mpc_cli_defaults_use_longer_high_speed_preview(self):
         run_my_control = importlib.import_module("run_my_control")
 

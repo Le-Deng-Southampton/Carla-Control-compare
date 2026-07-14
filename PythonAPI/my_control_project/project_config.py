@@ -222,8 +222,8 @@ DEFAULTS = {
     "pid_max_throttle": 1.0,
     "pid_max_brake": 0.28,
     "pid_max_steer": 0.65,
-    "pid_max_steer_rate": 0.10,
-    "pid_curvature_feedforward_gain": 0.90,
+    "pid_max_steer_rate": 0.65,
+    "pid_curvature_feedforward_gain": 0.0,
     "pid_curvature_preview_horizon": 10,
     "pid_curvature_preview_blend": 0.55,
 }
@@ -342,6 +342,11 @@ CLI_ARGUMENTS = (
     (("--pid-long-kd",), {"type": float, "default": DEFAULTS["pid_long_kd"], "help": "PID longitudinal D gain."}),
     (("--pid-max-throttle",), {"type": float, "default": DEFAULTS["pid_max_throttle"], "help": "Maximum PID throttle command."}),
     (("--pid-max-brake",), {"type": float, "default": DEFAULTS["pid_max_brake"], "help": "Maximum PID brake command."}),
+    (("--pid-max-steer",), {"type": float, "default": DEFAULTS["pid_max_steer"], "help": "Maximum absolute PID steering command."}),
+    (("--pid-max-steer-rate",), {"type": float, "default": DEFAULTS["pid_max_steer_rate"], "help": "Maximum PID steering change per control step."}),
+    (("--pid-curvature-feedforward-gain",), {"type": float, "default": DEFAULTS["pid_curvature_feedforward_gain"], "help": "Gain applied to PID bicycle-model curvature feedforward."}),
+    (("--pid-curvature-preview-horizon",), {"type": int, "default": DEFAULTS["pid_curvature_preview_horizon"], "help": "Number of curvature samples used by PID feedforward preview."}),
+    (("--pid-curvature-preview-blend",), {"type": float, "default": DEFAULTS["pid_curvature_preview_blend"], "help": "Blend from current curvature toward near-preview curvature for PID feedforward."}),
 )
 
 LQR_LONGITUDINAL_PARAM_FIELDS = (
