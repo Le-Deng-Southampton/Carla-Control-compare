@@ -71,14 +71,8 @@ class PidControllerAdapter(BaseTrackingController):
         if hasattr(self._lat_controller, "_e_buffer"):
             self._lat_controller._e_buffer.clear()
 
-    def _steer_rate_limit(self, speed_mps):
-        if not self.speed_scheduling_enabled:
-            return max(float(self.max_steer_rate), 0.0)
-        speed_kmh = max(float(speed_mps) * 3.6, 0.0)
-        speed_points = np.array([0.0, 35.0, 55.0, 85.0, 120.0])
-        rate_points = np.array([0.080, 0.070, 0.055, 0.035, 0.025])
-        scheduled = float(np.interp(speed_kmh, speed_points, rate_points))
-        return max(min(float(self.max_steer_rate), scheduled), 0.0)
+    def _steer_rate_limit(self):
+        return max(float(self.max_steer_rate), 0.0)
 
     def run_step(
         self,
@@ -112,7 +106,7 @@ class PidControllerAdapter(BaseTrackingController):
         steer_fb = self._lat_controller.run_step(target_waypoint)
         requested_steering = steer_fb + steer_ff
 
-        steer_rate_limit = self._steer_rate_limit(speed_mps)
+        steer_rate_limit = self._steer_rate_limit()
         current_steering = float(np.clip(
             requested_steering,
             self.past_steering - steer_rate_limit,

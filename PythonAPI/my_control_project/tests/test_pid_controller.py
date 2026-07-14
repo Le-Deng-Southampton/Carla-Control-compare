@@ -124,34 +124,40 @@ class PidControllerAdapterTest(unittest.TestCase):
                     curvature=curvature,
                 )
 
-    def test_continuous_steer_rate_decreases_with_speed(self):
-        cases = (
-            (30.0, 0.0),
-            (45.0, 0.0),
-            (105.0, 0.0),
-            (45.0, 0.08),
-        )
-        for speed_kmh, curvature in cases:
-            vehicle = StaticVehicle(speed=speed_kmh / 3.6)
-            controller = make_controller(
-                vehicle,
-                RecordingLateralController(steer=1.0),
-                max_steer_rate=0.10,
-                curvature_feedforward_gain=0.0,
-            )
-
-            control = controller.run_step(vehicle, make_waypoint(), curvature=curvature)
-
-            with self.subTest(speed_kmh=speed_kmh, curvature=curvature):
-                self.assertAlmostEqual(
-                    control.steer,
-                    controller._steer_rate_limit(speed_kmh / 3.6),
+    def test_steer_rate_limit_is_fixed_across_speed_and_curvature(self):
+        for speed_kmh in (30.0, 50.0, 70.0, 90.0, 120.0):
+            for curvature in (0.0, 0.08):
+                vehicle = StaticVehicle(speed=speed_kmh / 3.6)
+                controller = make_controller(
+                    vehicle,
+                    RecordingLateralController(steer=1.0),
+                    max_steer_rate=0.10,
+                    curvature_feedforward_gain=0.0,
                 )
-            self._assert_base_diagnostics(
-                controller,
-                speed_kmh=speed_kmh,
-                curvature=curvature,
-            )
+
+                control = controller.run_step(
+                    vehicle,
+                    make_waypoint(),
+                    curvature=curvature,
+                )
+
+                with self.subTest(speed_kmh=speed_kmh, curvature=curvature):
+                    self.assertAlmostEqual(controller.last_steer_rate_limit, 0.10)
+                    self.assertAlmostEqual(control.steer, 0.10)
+
+    def test_negative_steer_rate_limit_is_treated_as_zero(self):
+        vehicle = StaticVehicle(speed=30.0 / 3.6)
+        controller = make_controller(
+            vehicle,
+            RecordingLateralController(steer=1.0),
+            max_steer_rate=-0.25,
+            curvature_feedforward_gain=0.0,
+        )
+
+        control = controller.run_step(vehicle, make_waypoint())
+
+        self.assertEqual(controller.last_steer_rate_limit, 0.0)
+        self.assertEqual(control.steer, 0.0)
 
     def test_fixed_preview_produces_equal_steering_at_low_and_high_speed(self):
         curvature = [0.0, 0.0, 0.08]
@@ -232,23 +238,6 @@ class PidControllerAdapterTest(unittest.TestCase):
 
         self.assertEqual(lateral.targets, [waypoint])
         self.assertAlmostEqual(control.steer, 0.24)
-
-    def test_continuous_speed_rate_limit_has_no_85_kmh_boundary_jump(self):
-        controller = make_controller(
-            StaticVehicle(),
-            RecordingLateralController(),
-            max_steer_rate=0.10,
-        )
-
-        below = controller._steer_rate_limit(84.9 / 3.6)
-        above = controller._steer_rate_limit(85.1 / 3.6)
-        low = controller._steer_rate_limit(30.0 / 3.6)
-        high = controller._steer_rate_limit(120.0 / 3.6)
-
-        self.assertLess(abs(below - above), 0.001)
-        self.assertGreater(low, high)
-        self.assertLessEqual(high, 0.025)
-
 
 if __name__ == "__main__":
     unittest.main()
