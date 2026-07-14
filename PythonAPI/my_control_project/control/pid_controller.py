@@ -107,7 +107,6 @@ class PidControllerAdapter(BaseTrackingController):
         self.last_curvature_feedforward_scale = 1.0
         steer_ff = (
             self.curvature_feedforward_gain
-            * self.last_curvature_feedforward_scale
             * np.arctan(self.L * feedforward_curvature)
         )
         buffer_before = self._lateral_error_buffer_snapshot()
@@ -133,7 +132,7 @@ class PidControllerAdapter(BaseTrackingController):
 
         self.last_raw_steer = float(requested_steering)
         self.last_steer_rate_limit = float(steer_rate_limit)
-        self.last_steer_rate_limited = abs(current_steering - requested_steering) > 1e-9
+        self.last_steer_rate_limited = abs(steering - requested_steering) > 1e-9
         self.last_current_curvature = float(current_curvature)
         self.last_preview_curvature = float(feedforward_curvature)
 

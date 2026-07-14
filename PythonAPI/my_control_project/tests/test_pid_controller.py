@@ -216,6 +216,41 @@ class PidControllerAdapterTest(unittest.TestCase):
         with self.subTest(expectation="speed_independent_preview"):
             self.assertEqual(controls[30.0].steer, controls[105.0].steer)
 
+    def test_zero_feedforward_matches_c0_feedback_command(self):
+        vehicle = StaticVehicle(speed=70.0 / 3.6)
+        controller = make_controller(
+            vehicle,
+            RecordingLateralController(steer=-0.23),
+            max_steer_rate=1.0,
+            curvature_feedforward_gain=0.0,
+        )
+
+        control = controller.run_step(
+            vehicle,
+            make_waypoint(),
+            curvature=[0.01, 0.03, 0.06],
+            tracking_errors={"e_y": 2.0, "e_psi": np.radians(12.0)},
+        )
+
+        self.assertAlmostEqual(control.steer, -0.23)
+        self.assertEqual(controller.last_speed_profile, "pid_base")
+        self.assertEqual(controller.last_curvature_feedforward_scale, 1.0)
+
+    def test_amplitude_limit_is_reported_as_steer_limiting(self):
+        vehicle = StaticVehicle(speed=30.0 / 3.6)
+        controller = make_controller(
+            vehicle,
+            RecordingLateralController(steer=0.90),
+            max_steer_rate=1.0,
+            max_steering=0.65,
+            curvature_feedforward_gain=0.0,
+        )
+
+        control = controller.run_step(vehicle, make_waypoint())
+
+        self.assertEqual(control.steer, 0.65)
+        self.assertTrue(controller.last_steer_rate_limited)
+
     def test_curvature_feedforward_adds_bicycle_reference_when_centered(self):
         vehicle = StaticVehicle(speed=50.0 / 3.6)
         controller = make_controller(
