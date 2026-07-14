@@ -99,6 +99,13 @@ class PidControllerAdapterTest(unittest.TestCase):
             self.assertGreaterEqual(controller.last_curvature_feedforward_scale, 1.0)
             self.assertLessEqual(controller.last_curvature_feedforward_scale, 2.5)
 
+    def test_defaults_preserve_c0_steering_authority(self):
+        controller = make_controller(StaticVehicle(), RecordingLateralController())
+
+        self.assertEqual(controller.max_steer, 0.65)
+        self.assertEqual(controller.max_steer_rate, 0.65)
+        self.assertEqual(controller.curvature_feedforward_gain, 0.0)
+
     def test_fixed_pid_does_not_retune_lateral_gains(self):
         for speed_kmh in (30.0, 45.0, 105.0):
             for curvature in (0.0, 0.08):
