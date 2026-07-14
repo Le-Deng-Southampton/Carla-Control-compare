@@ -27,8 +27,9 @@ from control.pid_controller import PidControllerAdapter
 
 
 class RecordingLateralController:
-    def __init__(self, steer=0.0):
+    def __init__(self, steer=0.0, next_error=None):
         self.steer = steer
+        self.next_error = next_error
         self.parameters = []
         self.targets = []
         self._e_buffer = []
@@ -38,6 +39,8 @@ class RecordingLateralController:
 
     def run_step(self, target_waypoint):
         self.targets.append(target_waypoint)
+        if self.next_error is not None:
+            self._e_buffer.append(self.next_error)
         return self.steer
 
 
@@ -158,6 +161,36 @@ class PidControllerAdapterTest(unittest.TestCase):
 
         self.assertEqual(controller.last_steer_rate_limit, 0.0)
         self.assertEqual(control.steer, 0.0)
+
+    def test_rate_limit_rolls_back_error_that_drives_farther_into_saturation(self):
+        vehicle = StaticVehicle(speed=30.0 / 3.6)
+        lateral = RecordingLateralController(steer=1.0, next_error=0.20)
+        lateral._e_buffer.append(0.05)
+        controller = make_controller(
+            vehicle,
+            lateral,
+            max_steer_rate=0.10,
+            curvature_feedforward_gain=0.0,
+        )
+
+        controller.run_step(vehicle, make_waypoint())
+
+        self.assertEqual(lateral._e_buffer, [0.05])
+
+    def test_rate_limit_keeps_error_that_drives_out_of_saturation(self):
+        vehicle = StaticVehicle(speed=30.0 / 3.6)
+        lateral = RecordingLateralController(steer=1.0, next_error=-0.20)
+        lateral._e_buffer.append(0.05)
+        controller = make_controller(
+            vehicle,
+            lateral,
+            max_steer_rate=0.10,
+            curvature_feedforward_gain=0.0,
+        )
+
+        controller.run_step(vehicle, make_waypoint())
+
+        self.assertEqual(lateral._e_buffer, [0.05, -0.20])
 
     def test_fixed_preview_produces_equal_steering_at_low_and_high_speed(self):
         curvature = [0.0, 0.0, 0.08]

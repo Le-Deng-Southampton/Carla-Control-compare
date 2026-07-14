@@ -67,9 +67,16 @@ class PidControllerAdapter(BaseTrackingController):
         self.last_current_curvature = 0.0
         self.last_preview_curvature = 0.0
 
-    def _clear_lateral_integral(self):
-        if hasattr(self._lat_controller, "_e_buffer"):
-            self._lat_controller._e_buffer.clear()
+    def _lateral_error_buffer_snapshot(self):
+        if not hasattr(self._lat_controller, "_e_buffer"):
+            return None
+        return tuple(self._lat_controller._e_buffer)
+
+    def _restore_lateral_error_buffer(self, errors):
+        if errors is None or not hasattr(self._lat_controller, "_e_buffer"):
+            return
+        self._lat_controller._e_buffer.clear()
+        self._lat_controller._e_buffer.extend(errors)
 
     def _steer_rate_limit(self):
         return max(float(self.max_steer_rate), 0.0)
@@ -103,6 +110,7 @@ class PidControllerAdapter(BaseTrackingController):
             * self.last_curvature_feedforward_scale
             * np.arctan(self.L * feedforward_curvature)
         )
+        buffer_before = self._lateral_error_buffer_snapshot()
         steer_fb = self._lat_controller.run_step(target_waypoint)
         requested_steering = steer_fb + steer_ff
 
@@ -117,8 +125,11 @@ class PidControllerAdapter(BaseTrackingController):
             steering = min(self.max_steer, current_steering)
         else:
             steering = max(-self.max_steer, current_steering)
-        if abs(steering - requested_steering) > 1e-9:
-            self._clear_lateral_integral()
+        if buffer_before is not None and self._lat_controller._e_buffer:
+            newest_error = float(self._lat_controller._e_buffer[-1])
+            limiting_direction = float(requested_steering - steering)
+            if abs(limiting_direction) > 1e-9 and newest_error * limiting_direction > 0.0:
+                self._restore_lateral_error_buffer(buffer_before)
 
         self.last_raw_steer = float(requested_steering)
         self.last_steer_rate_limit = float(steer_rate_limit)
