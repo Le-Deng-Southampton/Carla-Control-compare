@@ -3,8 +3,26 @@ import numpy as np
 from agents.navigation.controller import PIDLateralController
 
 from .base import BaseTrackingController
-from .common import resolve_preview_curvature
 from .longitudinal import PidLongitudinalController
+
+
+def _resolve_preview_curvature(curvature, blend):
+    values = np.asarray(curvature, dtype=float).reshape(-1)
+    if values.size == 0:
+        return 0.0, 0.0
+
+    current_curvature = float(values[0])
+    if values.size == 1:
+        return current_curvature, current_curvature
+
+    weights = np.linspace(1.0, 0.40, values.size)
+    preview_curvature = float(values[int(np.argmax(np.abs(values) * weights))])
+    resolved_blend = float(np.clip(blend, 0.0, 1.0))
+    feedforward_curvature = (
+        (1.0 - resolved_blend) * current_curvature
+        + resolved_blend * preview_curvature
+    )
+    return current_curvature, feedforward_curvature
 
 
 class PidControllerAdapter(BaseTrackingController):
@@ -96,13 +114,9 @@ class PidControllerAdapter(BaseTrackingController):
             speed_mps,
             target_speed_mps=planned_target_speed_mps,
         )
-        current_curvature, feedforward_curvature = resolve_preview_curvature(
+        current_curvature, feedforward_curvature = _resolve_preview_curvature(
             curvature,
-            blend=self.curvature_preview_blend,
-            scheduling_enabled=False,
-            preview_weight_end=0.40,
-            preview_delta=0.015,
-            max_blend=0.78,
+            self.curvature_preview_blend,
         )
         self.last_curvature_feedforward_scale = 1.0
         steer_ff = (
