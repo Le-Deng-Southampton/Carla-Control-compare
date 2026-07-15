@@ -103,6 +103,27 @@ class ControllerFactoryTest(unittest.TestCase):
         self.assertEqual(controller._longitudinal_controller.ki, 0.02)
         self.assertEqual(controller._longitudinal_controller.kd, 0.09)
 
+    def test_pid_lateral_runtime_options_can_be_overridden(self):
+        controller = create_tracking_controller(
+            "pid",
+            FakeVehicle(),
+            build_args(
+                pid_max_steer=0.55,
+                pid_max_steer_rate=0.12,
+                pid_curvature_feedforward_gain=0.30,
+                pid_curvature_preview_horizon=7,
+                pid_curvature_preview_blend=0.40,
+                pid_derivative_filter_alpha=0.40,
+            ),
+        )
+
+        self.assertEqual(controller.max_steer, 0.55)
+        self.assertEqual(controller.max_steer_rate, 0.12)
+        self.assertEqual(controller.curvature_feedforward_gain, 0.30)
+        self.assertEqual(controller.horizon, 7)
+        self.assertEqual(controller.curvature_preview_blend, 0.40)
+        self.assertEqual(controller.derivative_filter_alpha, 0.40)
+
     def test_lqr_inside_curve_feedforward_params_can_be_overridden(self):
         controller = create_tracking_controller(
             "lqr",

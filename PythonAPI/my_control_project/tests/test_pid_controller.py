@@ -44,6 +44,16 @@ class RecordingLateralController:
         return self.steer
 
 
+class PidStateLateralController(RecordingLateralController):
+    def __init__(self, steer, errors, k_p=0.0, k_i=0.0, k_d=1.0, dt=0.05):
+        super().__init__(steer=steer, next_error=errors[-1])
+        self._e_buffer = list(errors[:-1])
+        self._k_p = k_p
+        self._k_i = k_i
+        self._k_d = k_d
+        self._dt = dt
+
+
 class RecordingLongitudinalController:
     def __init__(self):
         self.targets = []
@@ -105,6 +115,55 @@ class PidControllerAdapterTest(unittest.TestCase):
         self.assertEqual(controller.max_steer, 0.65)
         self.assertEqual(controller.max_steer_rate, 0.65)
         self.assertEqual(controller.curvature_feedforward_gain, 0.0)
+
+    def test_derivative_filter_reduces_waypoint_error_step(self):
+        vehicle = StaticVehicle()
+        lateral = PidStateLateralController(steer=0.8, errors=[0.0, 0.04])
+        controller = make_controller(
+            vehicle,
+            lateral,
+            derivative_filter_alpha=0.25,
+            max_steer_rate=1.0,
+        )
+
+        control = controller.run_step(vehicle, make_waypoint())
+
+        self.assertAlmostEqual(controller.last_raw_lateral_derivative, 0.8)
+        self.assertAlmostEqual(controller.last_filtered_lateral_derivative, 0.2)
+        self.assertAlmostEqual(control.steer, 0.2)
+        self.assertTrue(controller.last_derivative_filter_applied)
+
+    def test_derivative_filter_alpha_one_preserves_carla_feedback(self):
+        vehicle = StaticVehicle()
+        lateral = PidStateLateralController(steer=0.8, errors=[0.0, 0.04])
+        controller = make_controller(
+            vehicle,
+            lateral,
+            derivative_filter_alpha=1.0,
+            max_steering=1.0,
+            max_steer_rate=1.0,
+        )
+
+        control = controller.run_step(vehicle, make_waypoint())
+
+        self.assertAlmostEqual(control.steer, 0.8)
+        self.assertAlmostEqual(controller.last_filtered_lateral_derivative, 0.8)
+
+    def test_reset_clears_derivative_filter_state(self):
+        vehicle = StaticVehicle()
+        lateral = PidStateLateralController(steer=0.8, errors=[0.0, 0.04])
+        controller = make_controller(
+            vehicle,
+            lateral,
+            derivative_filter_alpha=0.25,
+            max_steer_rate=1.0,
+        )
+        controller.run_step(vehicle, make_waypoint())
+
+        controller.reset()
+
+        self.assertEqual(controller.last_raw_lateral_derivative, 0.0)
+        self.assertEqual(controller.last_filtered_lateral_derivative, 0.0)
 
     def test_fixed_pid_does_not_retune_lateral_gains(self):
         for speed_kmh in (30.0, 45.0, 105.0):

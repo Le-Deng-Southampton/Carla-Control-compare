@@ -34,7 +34,7 @@ class PidControllerAdapter(BaseTrackingController):
         target_speed=30.0,
         lat_kp=0.72,
         lat_ki=0.005,
-        lat_kd=0.38,
+        lat_kd=0.25,
         long_kp=0.22,
         long_ki=0.01,
         long_kd=0.14,
@@ -46,6 +46,7 @@ class PidControllerAdapter(BaseTrackingController):
         curvature_feedforward_gain=0.0,
         curvature_preview_horizon=10,
         curvature_preview_blend=0.55,
+        derivative_filter_alpha=1.0,
         integral_error_limit=np.radians(20.0),
         integral_separation_lateral_error=1.4,
         integral_separation_heading_error=np.radians(18.0),
@@ -56,6 +57,7 @@ class PidControllerAdapter(BaseTrackingController):
         self.max_steer_rate = max_steer_rate
         self.curvature_feedforward_gain = curvature_feedforward_gain
         self.curvature_preview_blend = curvature_preview_blend
+        self.derivative_filter_alpha = float(np.clip(derivative_filter_alpha, 0.0, 1.0))
         self.speed_scheduling_enabled = speed_scheduling_enabled
         self.supports_curvature_sequence = True
         self.horizon = max(int(curvature_preview_horizon), 1)
@@ -84,6 +86,10 @@ class PidControllerAdapter(BaseTrackingController):
         self.last_steer_rate_limited = False
         self.last_current_curvature = 0.0
         self.last_preview_curvature = 0.0
+        self.last_raw_lateral_derivative = 0.0
+        self.last_filtered_lateral_derivative = 0.0
+        self.last_derivative_filter_applied = False
+        self._filtered_lateral_derivative = 0.0
 
     def _lateral_error_buffer_snapshot(self):
         if not hasattr(self._lat_controller, "_e_buffer"):
@@ -98,6 +104,53 @@ class PidControllerAdapter(BaseTrackingController):
 
     def _steer_rate_limit(self):
         return max(float(self.max_steer_rate), 0.0)
+
+    def _filtered_lateral_feedback(self, fallback_steer):
+        controller = self._lat_controller
+        required_fields = ("_e_buffer", "_dt", "_k_p", "_k_i", "_k_d")
+        if not all(hasattr(controller, field) for field in required_fields):
+            self.last_raw_lateral_derivative = 0.0
+            self.last_filtered_lateral_derivative = self._filtered_lateral_derivative
+            self.last_derivative_filter_applied = False
+            return fallback_steer
+
+        errors = controller._e_buffer
+        if not errors:
+            self.last_raw_lateral_derivative = 0.0
+            self.last_filtered_lateral_derivative = self._filtered_lateral_derivative
+            self.last_derivative_filter_applied = False
+            return fallback_steer
+
+        dt = float(controller._dt)
+        if len(errors) >= 2 and dt > 0.0:
+            raw_derivative = (float(errors[-1]) - float(errors[-2])) / dt
+            integral_error = sum(errors) * dt
+        else:
+            raw_derivative = 0.0
+            integral_error = 0.0
+
+        alpha = self.derivative_filter_alpha
+        filtered_derivative = (
+            (1.0 - alpha) * self._filtered_lateral_derivative
+            + alpha * raw_derivative
+        )
+        self._filtered_lateral_derivative = float(filtered_derivative)
+        self.last_raw_lateral_derivative = float(raw_derivative)
+        self.last_filtered_lateral_derivative = float(filtered_derivative)
+
+        if alpha >= 1.0:
+            self.last_derivative_filter_applied = False
+            return fallback_steer
+
+        self.last_derivative_filter_applied = True
+        error = float(errors[-1])
+        return float(np.clip(
+            controller._k_p * error
+            + controller._k_d * filtered_derivative
+            + controller._k_i * integral_error,
+            -1.0,
+            1.0,
+        ))
 
     def run_step(
         self,
@@ -124,7 +177,9 @@ class PidControllerAdapter(BaseTrackingController):
             * np.arctan(self.L * feedforward_curvature)
         )
         buffer_before = self._lateral_error_buffer_snapshot()
+        derivative_before = self._filtered_lateral_derivative
         steer_fb = self._lat_controller.run_step(target_waypoint)
+        steer_fb = self._filtered_lateral_feedback(steer_fb)
         requested_steering = steer_fb + steer_ff
 
         steer_rate_limit = self._steer_rate_limit()
@@ -143,6 +198,8 @@ class PidControllerAdapter(BaseTrackingController):
             limiting_direction = float(requested_steering - steering)
             if abs(limiting_direction) > 1e-9 and newest_error * limiting_direction > 0.0:
                 self._restore_lateral_error_buffer(buffer_before)
+                self._filtered_lateral_derivative = derivative_before
+                self.last_filtered_lateral_derivative = derivative_before
 
         self.last_raw_steer = float(requested_steering)
         self.last_steer_rate_limit = float(steer_rate_limit)
@@ -168,6 +225,10 @@ class PidControllerAdapter(BaseTrackingController):
         self.last_steer_rate_limited = False
         self.last_current_curvature = 0.0
         self.last_preview_curvature = 0.0
+        self.last_raw_lateral_derivative = 0.0
+        self.last_filtered_lateral_derivative = 0.0
+        self.last_derivative_filter_applied = False
+        self._filtered_lateral_derivative = 0.0
         self._longitudinal_controller.reset()
         if hasattr(self._lat_controller, "_e_buffer"):
             self._lat_controller._e_buffer.clear()

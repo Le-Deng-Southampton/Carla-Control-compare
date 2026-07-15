@@ -208,6 +208,8 @@ class RunArgsTest(unittest.TestCase):
                 "10",
                 "--pid-curvature-preview-blend",
                 "0.55",
+                "--pid-derivative-filter-alpha",
+                "0.40",
             ],
         ):
             args = run_my_control.parse_args()
@@ -217,6 +219,7 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.pid_curvature_feedforward_gain, 0.0)
         self.assertEqual(args.pid_curvature_preview_horizon, 10)
         self.assertEqual(args.pid_curvature_preview_blend, 0.55)
+        self.assertEqual(args.pid_derivative_filter_alpha, 0.40)
 
     def test_pid_cli_defaults_preserve_c0_steering_authority(self):
         run_my_control = importlib.import_module("run_my_control")
@@ -227,6 +230,8 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.pid_max_steer, 0.65)
         self.assertEqual(args.pid_max_steer_rate, 0.65)
         self.assertEqual(args.pid_curvature_feedforward_gain, 0.0)
+        self.assertEqual(args.pid_lat_kd, 0.25)
+        self.assertEqual(args.pid_derivative_filter_alpha, 1.0)
 
     def test_mpc_cli_defaults_use_longer_high_speed_preview(self):
         run_my_control = importlib.import_module("run_my_control")

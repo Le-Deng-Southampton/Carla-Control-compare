@@ -73,7 +73,12 @@ def create_tracking_controller(controller_name, vehicle, args):
             dt=0.05,
             max_throttle=pid_max_throttle,
             max_brake=pid_max_brake,
-            max_steering=0.65,
+            max_steering=get_arg(args, "pid_max_steer", 0.65),
+            max_steer_rate=get_arg(args, "pid_max_steer_rate", 0.65),
+            curvature_feedforward_gain=get_arg(args, "pid_curvature_feedforward_gain", 0.0),
+            curvature_preview_horizon=get_arg(args, "pid_curvature_preview_horizon", 10),
+            curvature_preview_blend=get_arg(args, "pid_curvature_preview_blend", 0.55),
+            derivative_filter_alpha=get_arg(args, "pid_derivative_filter_alpha", 1.0),
             longitudinal_controller=create_pid_longitudinal_controller(
                 args.target_speed,
                 args.pid_long_kp,

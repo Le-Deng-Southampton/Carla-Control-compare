@@ -215,7 +215,7 @@ DEFAULTS = {
     "debug_mpc_stability": False,
     "pid_lat_kp": 0.72,
     "pid_lat_ki": 0.005,
-    "pid_lat_kd": 0.38,
+    "pid_lat_kd": 0.25,
     "pid_long_kp": 0.45,
     "pid_long_ki": 0.01,
     "pid_long_kd": 0.10,
@@ -226,6 +226,7 @@ DEFAULTS = {
     "pid_curvature_feedforward_gain": 0.0,
     "pid_curvature_preview_horizon": 10,
     "pid_curvature_preview_blend": 0.55,
+    "pid_derivative_filter_alpha": 1.0,
 }
 
 CLI_ARGUMENTS = (
@@ -347,6 +348,7 @@ CLI_ARGUMENTS = (
     (("--pid-curvature-feedforward-gain",), {"type": float, "default": DEFAULTS["pid_curvature_feedforward_gain"], "help": "Gain applied to PID bicycle-model curvature feedforward."}),
     (("--pid-curvature-preview-horizon",), {"type": int, "default": DEFAULTS["pid_curvature_preview_horizon"], "help": "Number of curvature samples used by PID feedforward preview."}),
     (("--pid-curvature-preview-blend",), {"type": float, "default": DEFAULTS["pid_curvature_preview_blend"], "help": "Blend from current curvature toward near-preview curvature for PID feedforward."}),
+    (("--pid-derivative-filter-alpha",), {"type": float, "default": DEFAULTS["pid_derivative_filter_alpha"], "help": "Low-pass blend factor for the PID lateral derivative term; 1.0 preserves CARLA behavior."}),
 )
 
 LQR_LONGITUDINAL_PARAM_FIELDS = (
@@ -415,6 +417,7 @@ PID_PARAM_FIELDS = (
     "pid_long_kd",
     "pid_max_throttle",
     "pid_max_brake",
+    "pid_derivative_filter_alpha",
 )
 
 STEP_CONTROLLER_PARAM_FIELDS = LQR_STEP_PARAM_FIELDS + MPC_PARAM_FIELDS + PID_PARAM_FIELDS
