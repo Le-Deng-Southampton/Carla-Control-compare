@@ -1,222 +1,288 @@
-# Carla-Control-compare
+# Design and Evaluation of a CARLA-Based Path-Tracking Framework with Adaptive Speed Planning
 
-## English
+This repository contains a Windows implementation of the traceable CARLA
+path-tracking evaluation framework developed for the project of the same name.
+It evaluates controller platforms and supporting optimisation modules under
+recorded, matched simulation conditions.
 
-CARLA controller-comparison project for evaluating LQR, PID, and MPC vehicle
-controllers under repeatable Windows CARLA simulation runs.
+The contribution is the **evaluation framework and evidence process**, not a
+new PID, LQR, or MPC control law. The custom research layer is located in
+[`PythonAPI/my_control_project`](PythonAPI/my_control_project/); CARLA provides
+the simulator, maps, vehicle physics, actors, sensors, and standard actuation
+interface.
 
-This repository contains a packaged CARLA Windows environment plus an MSc
-controller-comparison workspace in `PythonAPI/my_control_project`. The project
-keeps the custom experiment code separate from the official CARLA examples and
-runs multiple controllers on the same generated route so that tracking quality,
-speed control, steering smoothness, and failure conditions can be compared on a
-consistent basis.
+## Research scope
 
-### Main capabilities
+The framework addresses a practical problem in controller comparison: a result
+cannot be attributed to a controller when the route, speed policy, reference,
+error source, timing, or stopping rules also change. To make the comparison
+traceable, the implementation:
 
-- Compare LQR, PID, and MPC controllers in one run.
-- Run fixed-speed controller-only experiments with `--speed-planner-mode off`.
-- Run adaptive high-speed experiments with `--speed-planner-mode adaptive`.
-- Apply dynamic target-speed planning from preview curvature, lateral error,
-  heading error, and error growth rate.
-- Limit speed before curve entry with configurable entry-curvature thresholds.
-- Simulate perception-quality inputs with noise, delay, dropout, and smoothing.
-- Select CARLA maps with `--map-name auto`, `--map-name current`, or explicit
-  Town maps including Town01-Town05 and Town10HD variants. Auto mode considers
-  target speed, route shape, and the route length that each map can support.
-- Generate shaped routes including `true_straight`, `straight`,
-  `gentle_curve`, `s_curve`, and `curvy`.
-- Select the legacy or constrained Frenet reference planner with
-  `--planner-mode`; each PID/LQR/MPC run replays one frozen, hashed trajectory.
-- Save CSV metrics, trajectory plots, JSON run configuration, and a
-  human-readable Chinese experiment summary for each run.
+- runs CARLA 0.9.14 in synchronous mode with a fixed 0.05 s control interval;
+- constructs one reference trajectory before the controller laps, saves it,
+  fingerprints its content, and checks the same in-memory reference before each
+  matched run;
+- evaluates PID, LQR, and MPC controller platforms through one experiment
+  runtime and one vehicle-actuation interface;
+- records the effective map, route, speed, seed, planner, error source,
+  controller settings, stopping status, and evaluation metrics;
+- supports matched optimisation-module ablation and comparison against CARLA's
+  official PID implementation;
+- provides adaptive target-speed planning and a replaceable tracking-error
+  interface for controlled robustness studies.
 
-### Quick start on Windows
+## System overview
 
-Start the desktop launcher from the repository root:
-
-```powershell
-.\Start-CARLA-Project.bat
+```mermaid
+flowchart LR
+    C["Experiment case<br/>map, route, speed, seed"] --> R["Reference construction<br/>legacy or constrained Frenet"]
+    R --> H["Frozen trajectory<br/>geometry + SHA-256 fingerprint"]
+    H --> T["Continuous reference tracker"]
+    S["CARLA state"] --> T
+    T --> E["Error provider"]
+    H --> V["Curvature preview"]
+    E --> V
+    E --> P["Adaptive speed planner"]
+    V --> P
+    T --> K{"Lateral controller"}
+    K --> PID["PID"]
+    K --> LQR["LQR"]
+    K --> MPC["MPC"]
+    PID --> A["Steering + shared longitudinal PID"]
+    LQR --> A
+    MPC --> A
+    P --> A
+    A --> S
+    S --> L["Step logs, run summary,<br/>metrics and status"]
+    H --> L
 ```
 
-The launcher runs `Launch-CARLA-Project.ps1`, starts CARLA if port `2000` is
-not already available, waits for the simulator server, and then runs the
-controller-comparison script. If you do not pass `--speed-planner-mode`, the
-desktop launcher asks whether to run pure fixed-speed controller comparison or
-high-speed adaptive real-situation simulation. The pure comparison choice adds
-`--speed-planner-mode off --target-speed 70`; the high-speed simulation choice
-adds `--speed-planner-mode adaptive --target-speed 120`.
+## Current implementation
 
-Run the project script directly:
+### Controller platforms
+
+| Platform | Current selected implementation |
+| --- | --- |
+| PID | CARLA-style look-ahead waypoint angular error, finite error buffer, derivative low-pass filtering, and bounded steering magnitude/rate. |
+| LQR | Four-state dynamic bicycle formulation using lateral error, lateral-error rate, heading error, and heading-error rate, with discrete Riccati feedback and curvature preview conditioning. |
+| MPC | Four-state dynamic bicycle prediction rebuilt at every control cycle, a 20-step horizon, curvature disturbance preview, and projected steering magnitude/rate limits. |
+
+All three project controllers use the same longitudinal PID structure to turn a
+fixed or planned target speed into mutually exclusive throttle or brake
+commands. The repository also retains clearly separated baseline and recovered
+implementations for controlled comparisons; they are not silently substituted
+for the selected branches.
+
+### Reference and route planning
+
+- Route targets: `true_straight`, `straight`, `gentle_curve`, `s_curve`, and
+  `curvy`.
+- Map selection: automatic, current world, or an explicit supported Town map.
+- Reference planners: `legacy` and constrained `frenet`.
+- Reference conditioning: centreline resampling, smoothing, heading/curvature
+  recomputation, lane-clearance checks, and continuous segment projection.
+- Strict comparisons use `--planner-fallback error`; ordinary interactive runs
+  may use the explicit `legacy` fallback for expected Frenet infeasibility or
+  timeout conditions.
+
+### Speed planning
+
+`--speed-planner-mode off` holds the requested target speed for controller-only
+tests. `--speed-planner-mode adaptive` forms candidate speed limits from:
+
+- current and preview curvature;
+- curve-entry curvature;
+- lateral and heading error;
+- lateral- and heading-error growth rate;
+- recovery hold, hysteresis, and target acceleration/deceleration limits.
+
+The lowest active candidate becomes the target speed, and its reason is logged
+at each step. Use `--speed-planner-limit-profile global` when every controller
+must share identical planner limits. The default `controller` profile is for
+integrated system studies and is recorded explicitly.
+
+### Error providers
+
+- `ground_truth`: exact geometric errors from CARLA state and the frozen
+  reference;
+- `noisy_ground_truth`: configurable Gaussian noise, delay, held-sample
+  dropout, and smoothing applied after geometric error calculation;
+- `perception_proxy`: the same controlled perturbation implementation exposed
+  through a perception-oriented label.
+
+There is **no camera-, radar-, or LiDAR-derived tracking-error pipeline** in the
+current code. The provider interface is the future integration boundary, not a
+claim of completed perception.
+
+## Requirements and setup
+
+- Windows 11 or another compatible Windows environment
+- the packaged CARLA 0.9.14 Windows build in this repository
+- Miniconda or Anaconda with `conda` available
+- a GPU and driver capable of running CARLA
+
+Create or refresh the pinned `carla37` environment from the repository root:
 
 ```powershell
-cd D:\WindowsNoEditor\PythonAPI\my_control_project
-.\scripts\run_my_control.ps1
+powershell -ExecutionPolicy Bypass -File .\PythonAPI\setup_carla37.ps1
 ```
 
-Example fixed-speed controller comparison:
+The setup script installs Python 3.7, the packaged CARLA 0.9.14 wheel, NumPy,
+SciPy, Matplotlib, NetworkX, Shapely, Pillow, and Pygame.
+
+## Run a comparison
+
+Start CARLA in one terminal:
 
 ```powershell
-.\scripts\run_my_control.ps1 --speed-planner-mode off --target-speed 70 --route-shape true_straight --controllers lqr pid mpc
+.\CarlaUE4.exe
 ```
 
-Example adaptive high-speed comparison:
+Then run the project from a second terminal.
+
+Fixed-speed, controller-only comparison:
 
 ```powershell
-.\scripts\run_my_control.ps1 --speed-planner-mode adaptive --target-speed 120 --route-shape s_curve --controllers lqr pid mpc
+.\PythonAPI\my_control_project\scripts\run_my_control.ps1 `
+  --speed-planner-mode off `
+  --speed-planner-limit-profile global `
+  --planner-mode frenet `
+  --planner-fallback error `
+  --target-speed 70 `
+  --route-shape true_straight `
+  --error-provider ground_truth `
+  --controllers pid lqr mpc
 ```
 
-Example with an explicit map:
+Adaptive integrated-system run:
 
 ```powershell
-.\scripts\run_my_control.ps1 --map-name Town10HD --target-speed 100 --route-shape gentle_curve --controllers lqr pid mpc
+.\PythonAPI\my_control_project\scripts\run_my_control.ps1 `
+  --speed-planner-mode adaptive `
+  --target-speed 90 `
+  --route-shape s_curve `
+  --map-name Town04_Opt `
+  --seed 37321498 `
+  --controllers pid lqr mpc
 ```
 
-Strict Frenet comparison and paired planner matrix:
+The default run requests the Frenet planner, permits the explicit legacy
+fallback, uses adaptive speed planning with controller-specific limit profiles,
+and runs `lqr`, `pid`, and `mpc`.
+
+## Evaluation workflows
+
+The project includes reusable workflows for:
+
+- controller evaluation matrices and robustness perturbations:
+  `scripts/run_controller_evaluation.ps1`;
+- 90-case-per-variant module ablation:
+  `scripts/run_internal_module_ablation_90.ps1`;
+- legacy/Frenet smoke, extended, and stability matrices:
+  `scripts/run_test_matrix.ps1`;
+- aggregate metrics, paired comparisons, bootstrap intervals, Wilson intervals,
+  report generation, and official-PID source/configuration audits in
+  `experiment/`.
+
+For a short planner smoke matrix:
 
 ```powershell
-.\scripts\run_my_control.ps1 --planner-mode frenet --planner-fallback error --speed-planner-limit-profile global --controllers lqr pid mpc
-powershell -ExecutionPolicy Bypass -File .\scripts\run_test_matrix.ps1 -ScenarioSet stability -PlannerMode both
+powershell -ExecutionPolicy Bypass -File `
+  .\PythonAPI\my_control_project\scripts\run_test_matrix.ps1 `
+  -ScenarioSet smoke -PlannerMode both
 ```
 
-Ordinary runs request Frenet by default and use `--planner-fallback legacy` so
-an expected planning timeout or infeasible route cannot prevent startup.
-Unexpected programming errors still propagate. Strict comparisons use
-`--planner-fallback error`, and matrix rows verify the resolved planner mode, so
-a fallback legacy result cannot be reported as a Frenet success. Every run
-saves `reference_trajectory.json`; its hash is recorded in step logs, summaries,
-and run configuration so controller comparisons can verify that the reference
-geometry was identical. The curvature and curvature-rate safety limits remain
-unchanged; smoke success establishes usability, not superior performance.
+The matrix wrappers that own simulator startup launch CARLA when needed. Batch
+workflows write manifests and status records and fail when required rows or
+matched-condition checks do not pass.
 
-### Project layout
+## Outputs
+
+Generated outputs are written below `PythonAPI/my_control_project/log/` and are
+excluded from version control. A normal comparison run produces:
+
+- `reference_trajectory.json` - saved reference geometry, metadata, and
+  fingerprint;
+- `step_log.csv` - per-step state, error, speed-plan reason, actuation,
+  stability, and controller-time fields;
+- `summary.csv` - run status and aggregate accuracy, speed, dynamics, runtime,
+  and stability metrics;
+- `run_config.json` - resolved experiment and implementation settings;
+- `trajectory_compare.png` - route and controller trajectories;
+- `human_summary.txt` - readable result and test-condition summary.
+
+The primary evaluation logic treats completion and safety/stability conditions
+as hard eligibility gates before softer accuracy, dynamics, and runtime metrics
+are interpreted.
+
+## Tests
+
+Run the project test suite from the repository root with a Python 3.8+ development
+environment containing the project dependencies:
+
+```powershell
+python -m unittest discover -s .\PythonAPI\my_control_project\tests -v
+```
+
+The suite covers configuration, controller construction, longitudinal control,
+reference planning and tracking, error providers, speed planning, runtime and
+termination, evaluation aggregation, official-PID comparison, and batch-script
+contracts. CARLA execution remains pinned to the `carla37` environment because
+of the packaged CARLA 0.9.14 wheel; the current tests use newer
+`unittest.mock` call-inspection properties and should not be run under Python
+3.7.
+
+## Reported study evidence
+
+The dissertation reports two primary evidence tracks produced with this
+framework:
+
+- 1,890 completed module-ablation runs evaluating 18 optimisation modules;
+- 360 completed official-baseline runs, forming 270 matched
+  official-to-candidate pairs with zero recorded condition mismatches.
+
+For the recorded CARLA cases, the selected project PID gave the most balanced
+overall result. Relative to CARLA's official PID, it reduced mean lateral IAE by
+34.0%, speed RMS error by 15.5%, and lateral-jerk P95 by 27.3%, with similar
+runtime. LQR reduced mean lateral IAE by 45.0% and speed RMS error by 15.4%, with
+higher dynamic and computational demand. MPC reduced speed RMS error by 18.3%;
+its wider metric profile was less consistently positive.
+
+These are configuration- and scenario-specific simulation findings, not a
+universal ranking of PID, LQR, and MPC. Adaptive-speed execution was verified,
+but its independent benefit still requires a matched planner-off/planner-on
+study. The work does not establish real-vehicle safety.
+
+## Repository layout
 
 ```text
 PythonAPI/my_control_project/
-+-- run_my_control.py          # Argument parsing and comparison entry point
-+-- scripts/run_my_control.ps1 # Windows/Conda/PYTHONPATH launcher
-+-- control/                   # LQR, PID, MPC, and longitudinal control
-+-- speed_planning/            # Dynamic target-speed planner
-+-- road_planning/             # Route generation and tracking geometry
-+-- error_providers/           # Ground-truth and perception-like error inputs
-+-- experiment/                # Runtime loop, metrics, logging, summaries
++-- run_my_control.py          # Main experiment entry point
++-- project_config.py          # Defaults, supported maps, and CLI options
++-- control/                   # PID, LQR, MPC, baselines, shared longitudinal PID
++-- road_planning/             # Route search, Frenet planning, reference tracking
++-- speed_planning/            # Curvature- and tracking-risk target-speed planner
++-- error_providers/           # Exact and controlled perturbed error sources
++-- experiment/                # Runtime, logging, metrics, aggregation, reports
++-- scripts/                   # Launchers, matrices, and module-ablation workflows
 +-- tests/                     # Unit and regression tests
 ```
 
-### Outputs
+Detailed developer notes are available in
+[`PythonAPI/my_control_project/README.md`](PythonAPI/my_control_project/README.md).
 
-Experiment outputs are written under:
+## 中文说明
 
-```text
-PythonAPI/my_control_project/log/
-```
+本仓库实现了一个基于 CARLA 0.9.14 的可追溯路径跟踪评估框架。项目在固定的
+0.05 秒同步循环中，对 PID、LQR 和 MPC 控制器平台及其优化模块进行匹配条件下的
+比较。核心方法包括冻结并校验参考轨迹、统一实验配置和终止规则、模块消融、CARLA
+官方 PID 外部基准、自适应目标速度规划，以及可替换的跟踪误差接口。
 
-Each run normally creates `step_log.csv`, `summary.csv`, `run_config.json`,
-`trajectory_compare.png`, and `human_summary.txt`. These files are intentionally
-excluded from version control because they are generated experiment artifacts.
+本项目的主要贡献是评估框架和证据流程，而不是新的控制理论。当前
+`perception_proxy` 仅用于可控噪声、延迟、丢帧和平滑实验，并不包含真实视觉、雷达或
+激光雷达感知。所有结论仅适用于已记录的 CARLA 仿真条件，不能用于证明实车安全。
 
-### Tests
+## License
 
-Run the focused project test suite from the repository root:
-
-```powershell
-python -m unittest discover -s PythonAPI\my_control_project\tests -v
-```
-
-## 中文
-
-这是一个基于 CARLA Windows 版本的车辆控制器对比实验项目，用于在可复现实验条件下比较
-LQR、PID 和 MPC 控制器的路径跟踪、速度控制、转向平顺性和异常终止表现。
-
-仓库包含 CARLA Windows 运行环境，以及位于 `PythonAPI/my_control_project` 的硕士项目实验代码。
-自定义代码与 CARLA 官方示例分离，同一次运行中会让多个控制器使用同一条路线，从而保证对比结果公平。
-
-### 核心功能
-
-- 在同一次实验中对比 LQR、PID、MPC 控制器。
-- 使用 `--speed-planner-mode off` 运行固定目标速度的纯控制器对比。
-- 使用 `--speed-planner-mode adaptive` 运行带自适应速度规划的高速综合实验。
-- 使用 `--planner-mode legacy|frenet` 选择参考轨迹规划器；同次实验的 PID、LQR、MPC
-  共享一条预先冻结并校验哈希的轨迹。
-- 根据前方路线曲率、横向偏差、航向偏差和误差增长率动态调整目标速度。
-- 在检测到弯道入口时提前限速，降低高速入弯风险。
-- 支持感知误差模拟：噪声、延迟、丢帧和平滑。
-- 支持 `true_straight`、`straight`、`gentle_curve`、`s_curve`、`curvy` 等路线形状。
-- 每次实验保存 CSV 指标、轨迹图、JSON 参数配置，以及中文可读实验总结。
-
-### Windows 快速启动
-
-在仓库根目录运行：
-
-```powershell
-.\Start-CARLA-Project.bat
-```
-
-该脚本会调用 `Launch-CARLA-Project.ps1`。如果本机 `localhost:2000` 没有正在运行的 CARLA
-服务器，它会先启动 CARLA，等待服务器可用后再运行控制器对比实验。
-
-也可以直接运行项目脚本：
-
-```powershell
-cd D:\WindowsNoEditor\PythonAPI\my_control_project
-.\scripts\run_my_control.ps1
-```
-
-固定速度对比示例：
-
-```powershell
-.\scripts\run_my_control.ps1 --speed-planner-mode off --target-speed 70 --route-shape true_straight --controllers lqr pid mpc
-```
-
-自适应高速对比示例：
-
-```powershell
-.\scripts\run_my_control.ps1 --speed-planner-mode adaptive --target-speed 120 --route-shape s_curve --controllers lqr pid mpc
-```
-
-严格的 Frenet 对比与成对矩阵：
-
-```powershell
-.\scripts\run_my_control.ps1 --planner-mode frenet --planner-fallback error --speed-planner-limit-profile global --controllers lqr pid mpc
-powershell -ExecutionPolicy Bypass -File .\scripts\run_test_matrix.ps1 -ScenarioSet stability -PlannerMode both
-```
-
-普通运行默认请求 Frenet，并使用 `--planner-fallback legacy`，使预期的规划超时或无可行
-轨迹不会阻止项目启动；非预期程序错误仍会直接暴露。严格对比使用
-`--planner-fallback error`，矩阵还会核对实际解析出的规划器，因此 legacy 回退结果不会被
-误记为 Frenet 成功。每次运行都会保存 `reference_trajectory.json`，并在步日志、摘要和运行
-配置中记录请求/实际规划器、回退原因和轨迹哈希。曲率与曲率率安全阈值没有放宽；冒烟
-通过只证明功能可用，不代表 Frenet 性能优于 legacy。
-
-### 项目结构
-
-```text
-PythonAPI/my_control_project/
-+-- run_my_control.py          # 参数解析和实验入口
-+-- scripts/run_my_control.ps1 # Windows/Conda/PYTHONPATH 启动脚本
-+-- control/                   # LQR、PID、MPC 和纵向速度控制
-+-- Speed_Planing/             # 动态目标速度规划
-+-- road_planning/             # 路线生成和跟踪几何
-+-- error_providers/           # 真实误差和感知代理误差输入
-+-- experiment/                # 运行循环、指标、日志和总结
-+-- tests/                     # 单元测试和回归测试
-```
-
-### 实验输出
-
-实验结果写入：
-
-```text
-PythonAPI/my_control_project/log/
-```
-
-每次运行通常会生成 `step_log.csv`、`summary.csv`、`run_config.json`、
-`trajectory_compare.png` 和 `human_summary.txt`。这些文件是运行产物，不纳入版本控制。
-
-### 测试
-
-在仓库根目录运行：
-
-```powershell
-python -m unittest discover -s PythonAPI\my_control_project\tests -v
-```
+See [`LICENSE`](LICENSE). CARLA and bundled third-party components retain their
+respective licenses.
