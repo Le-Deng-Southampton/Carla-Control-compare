@@ -186,11 +186,10 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.lqr_max_steer, 0.60)
         self.assertEqual(args.lqr_max_steer_rate, 0.22)
         self.assertEqual(args.lqr_curvature_alpha, 0.60)
-        self.assertEqual(args.lqr_feedforward_gain, 1.0)
         self.assertEqual(args.lqr_curvature_preview_horizon, 12)
         self.assertEqual(args.lqr_curvature_preview_blend, 0.40)
 
-    def test_pid_cli_allows_feedforward_ablation(self):
+    def test_pid_cli_allows_derivative_filter_tuning(self):
         run_my_control = importlib.import_module("run_my_control")
 
         with mock.patch.object(
@@ -202,12 +201,6 @@ class RunArgsTest(unittest.TestCase):
                 "0.65",
                 "--pid-max-steer-rate",
                 "0.10",
-                "--pid-curvature-feedforward-gain",
-                "0.0",
-                "--pid-curvature-preview-horizon",
-                "10",
-                "--pid-curvature-preview-blend",
-                "0.55",
                 "--pid-derivative-filter-alpha",
                 "0.40",
             ],
@@ -216,9 +209,6 @@ class RunArgsTest(unittest.TestCase):
 
         self.assertEqual(args.pid_max_steer, 0.65)
         self.assertEqual(args.pid_max_steer_rate, 0.10)
-        self.assertEqual(args.pid_curvature_feedforward_gain, 0.0)
-        self.assertEqual(args.pid_curvature_preview_horizon, 10)
-        self.assertEqual(args.pid_curvature_preview_blend, 0.55)
         self.assertEqual(args.pid_derivative_filter_alpha, 0.40)
 
     def test_pid_cli_defaults_preserve_c0_steering_authority(self):
@@ -229,9 +219,8 @@ class RunArgsTest(unittest.TestCase):
 
         self.assertEqual(args.pid_max_steer, 0.65)
         self.assertEqual(args.pid_max_steer_rate, 0.65)
-        self.assertEqual(args.pid_curvature_feedforward_gain, 0.0)
         self.assertEqual(args.pid_lat_kd, 0.25)
-        self.assertEqual(args.pid_derivative_filter_alpha, 1.0)
+        self.assertEqual(args.pid_derivative_filter_alpha, 0.50)
 
     def test_mpc_cli_defaults_use_longer_high_speed_preview(self):
         run_my_control = importlib.import_module("run_my_control")
@@ -250,27 +239,9 @@ class RunArgsTest(unittest.TestCase):
         self.assertEqual(args.mpc_max_lateral_accel, 6.0)
         self.assertEqual(args.mpc_min_dynamic_steer_limit, 0.24)
         self.assertEqual(args.mpc_cornering_stiffness_scale, 1.0)
-        self.assertEqual(args.mpc_min_horizon, 10)
-        self.assertFalse(args.mpc_adaptive_horizon_enabled)
-        self.assertEqual(args.mpc_model_type, "kinematic")
         self.assertEqual(args.mpc_derivative_alpha, 0.25)
-        self.assertEqual(args.mpc_event_trigger_curvature, 0.008)
         self.assertEqual(args.mpc_curvature_filter_alpha, 0.20)
-        self.assertEqual(args.mpc_curvature_feedforward_gain, 1.0)
-        self.assertFalse(args.mpc_small_error_steer_deadband_enabled)
-        self.assertEqual(args.mpc_small_error_lateral_threshold, 0.08)
-        self.assertEqual(args.mpc_small_error_heading_threshold, 0.8)
-        self.assertEqual(args.mpc_small_error_steer_hold_delta, 0.006)
-        self.assertEqual(args.mpc_small_error_current_curvature_threshold, 0.010)
         self.assertFalse(args.debug_mpc_stability)
-
-    def test_mpc_adaptive_horizon_can_be_enabled(self):
-        run_my_control = importlib.import_module("run_my_control")
-
-        with mock.patch.object(sys, "argv", ["run_my_control.py", "--mpc-enable-adaptive-horizon"]):
-            args = run_my_control.parse_args()
-
-        self.assertTrue(args.mpc_adaptive_horizon_enabled)
 
     def test_speed_planner_cli_defaults_enable_curvature_based_dynamic_speed(self):
         run_my_control = importlib.import_module("run_my_control")

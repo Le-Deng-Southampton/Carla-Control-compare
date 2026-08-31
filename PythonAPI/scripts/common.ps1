@@ -1,9 +1,15 @@
 $ErrorActionPreference = "Stop"
 
 function Get-CondaCommand {
-    $userConda = Join-Path $env:USERPROFILE "miniconda3\Scripts\conda.exe"
-    if (Test-Path $userConda) {
-        return $userConda
+    $candidates = @(
+        $env:CONDA_EXE,
+        (Join-Path $env:USERPROFILE "miniconda3\Scripts\conda.exe"),
+        "D:\miniconda3\Scripts\conda.exe"
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
     }
 
     $pathConda = Get-Command "conda" -ErrorAction SilentlyContinue

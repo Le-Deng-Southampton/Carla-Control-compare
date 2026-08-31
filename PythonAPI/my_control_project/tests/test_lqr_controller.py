@@ -55,6 +55,43 @@ def make_waypoint(x=0.0, y=0.0, yaw=0.0):
 
 
 class LqrControllerTest(unittest.TestCase):
+    def test_curvature_sequence_preview_is_filtered_for_yaw_rate_error(self):
+        controller = LqrController(
+            q_weights=(0.0, 0.0, 0.0, 0.0),
+            r_weight=1.0,
+            max_steer=0.65,
+            max_steer_rate=0.65,
+            curvature_alpha=1.0,
+            curvature_preview_blend=0.5,
+            max_lateral_accel=0.0,
+        )
+        vehicle = StaticVehicle()
+        waypoint = make_waypoint()
+
+        control = controller.run_step(
+            vehicle,
+            waypoint,
+            curvature=[0.0, 0.04],
+            tracking_errors={"e_y": 0.0, "e_psi": 0.0, "reference_yaw": 0.0},
+        )
+
+        self.assertAlmostEqual(control.steer, 0.0, places=6)
+        self.assertEqual(controller.last_current_curvature, 0.0)
+        self.assertAlmostEqual(controller.last_preview_curvature, 0.02)
+
+    def test_lateral_acceleration_envelope_reduces_high_speed_authority(self):
+        controller = LqrController(
+            max_steer=0.65,
+            max_lateral_accel=6.0,
+            min_dynamic_steer_limit=0.12,
+        )
+
+        low_speed_limit = controller._dynamic_steer_limit(5.0)
+        high_speed_limit = controller._dynamic_steer_limit(30.0)
+
+        self.assertGreater(low_speed_limit, high_speed_limit)
+        self.assertLessEqual(low_speed_limit, 0.65)
+        self.assertEqual(high_speed_limit, 0.12)
     def test_default_params_are_tuned_for_high_speed_without_aggressive_saturation(self):
         controller = LqrController()
 
@@ -65,33 +102,10 @@ class LqrControllerTest(unittest.TestCase):
         self.assertEqual(controller.max_steer, 0.55)
         self.assertEqual(controller.max_steer_rate, 0.16)
         self.assertEqual(controller.curvature_alpha, 0.50)
-        self.assertEqual(controller.feedforward_gain, 1.0)
-        self.assertEqual(controller.turn_in_rate_scale, 0.70)
-        self.assertEqual(controller.turn_in_guard_lateral_error, 1.0)
-        self.assertAlmostEqual(controller.turn_in_guard_heading_error, np.radians(10.0))
-        self.assertEqual(controller.turn_in_guard_max_curvature, 0.04)
-        self.assertEqual(controller.inside_error_feedforward_start, 0.80)
-        self.assertEqual(controller.inside_error_feedforward_full, 1.80)
-        self.assertEqual(controller.inside_error_feedforward_min_scale, 0.65)
-        self.assertAlmostEqual(controller.inside_error_feedforward_heading_limit, np.radians(4.0))
+        self.assertEqual(controller.horizon, 12)
+        self.assertEqual(controller.curvature_preview_blend, 0.40)
         self.assertLess(controller._gain_matrix[0, 0], 0.8)
         self.assertLess(controller._gain_matrix[0, 2], 4.4)
-
-    def test_default_curve_feedforward_uses_bicycle_reference(self):
-        controller = LqrController(
-            q_weights=(0.0, 0.0, 0.0, 0.0),
-            r_weight=1.0,
-            max_steer=0.65,
-            max_steer_rate=0.65,
-        )
-        vehicle = StaticVehicle()
-        waypoint = make_waypoint()
-        curvature = 0.025
-
-        for _ in range(30):
-            control = controller.run_step(vehicle, waypoint, curvature=curvature)
-
-        self.assertAlmostEqual(control.steer, np.arctan(controller.L * curvature), places=3)
 
     def test_first_sample_does_not_turn_lateral_offset_into_derivative_spike(self):
         controller = LqrController(
@@ -144,160 +158,6 @@ class LqrControllerTest(unittest.TestCase):
 
         self.assertLess(control.steer, -0.1)
 
-    def test_zero_error_constant_curvature_feedforward_converges_to_bicycle_reference(self):
-        controller = LqrController(
-            q_weights=(0.0, 0.0, 0.0, 0.0),
-            r_weight=1.0,
-            max_steer=0.65,
-            max_steer_rate=0.65,
-            feedforward_gain=1.0,
-        )
-        vehicle = StaticVehicle()
-        waypoint = make_waypoint()
-        curvature = 0.04
-
-        for _ in range(30):
-            control = controller.run_step(vehicle, waypoint, curvature=curvature)
-
-        self.assertAlmostEqual(control.steer, np.arctan(controller.L * curvature), places=3)
-
-    def test_inside_curve_lateral_error_reduces_curvature_feedforward(self):
-        controller = LqrController(
-            q_weights=(0.0, 0.0, 0.0, 0.0),
-            r_weight=1.0,
-            max_steer=0.65,
-            max_steer_rate=1.0,
-            curvature_alpha=1.0,
-            turn_in_rate_scale=1.0,
-            inside_error_feedforward_start=0.35,
-            inside_error_feedforward_full=1.0,
-            inside_error_feedforward_min_scale=0.35,
-        )
-        vehicle = StaticVehicle()
-        waypoint = make_waypoint()
-        curvature = -0.04
-
-        control = controller.run_step(
-            vehicle,
-            waypoint,
-            curvature=curvature,
-            tracking_errors={"e_y": -1.2, "e_psi": 0.0, "reference_yaw": 0.0},
-        )
-
-        expected = 0.35 * np.arctan(controller.L * curvature)
-        self.assertAlmostEqual(control.steer, expected, places=3)
-
-    def test_outside_curve_lateral_error_keeps_curvature_feedforward(self):
-        controller = LqrController(
-            q_weights=(0.0, 0.0, 0.0, 0.0),
-            r_weight=1.0,
-            max_steer=0.65,
-            max_steer_rate=1.0,
-            curvature_alpha=1.0,
-            turn_in_rate_scale=1.0,
-        )
-        vehicle = StaticVehicle()
-        waypoint = make_waypoint()
-        curvature = -0.04
-
-        control = controller.run_step(
-            vehicle,
-            waypoint,
-            curvature=curvature,
-            tracking_errors={"e_y": 1.2, "e_psi": 0.0, "reference_yaw": 0.0},
-        )
-
-        self.assertAlmostEqual(control.steer, np.arctan(controller.L * curvature), places=3)
-
-    def test_large_heading_error_keeps_inside_curve_feedforward(self):
-        controller = LqrController(
-            q_weights=(0.0, 0.0, 0.0, 0.0),
-            r_weight=1.0,
-            max_steer=0.65,
-            max_steer_rate=1.0,
-            curvature_alpha=1.0,
-            turn_in_rate_scale=1.0,
-            inside_error_feedforward_heading_limit=np.radians(10.0),
-        )
-        vehicle = StaticVehicle()
-        waypoint = make_waypoint()
-        curvature = 0.04
-
-        control = controller.run_step(
-            vehicle,
-            waypoint,
-            curvature=curvature,
-            tracking_errors={"e_y": 1.2, "e_psi": np.radians(-20.0), "reference_yaw": 0.0},
-        )
-
-        self.assertAlmostEqual(control.steer, np.arctan(controller.L * curvature), places=3)
-
-    def test_turn_in_guard_limits_rate_near_centerline(self):
-        controller = LqrController(
-            q_weights=(0.0, 0.0, 0.0, 0.0),
-            r_weight=1.0,
-            max_steer=0.65,
-            max_steer_rate=0.20,
-            curvature_alpha=1.0,
-            turn_in_rate_scale=0.5,
-            turn_in_guard_max_curvature=0.25,
-        )
-        vehicle = StaticVehicle()
-        waypoint = make_waypoint()
-
-        control = controller.run_step(
-            vehicle,
-            waypoint,
-            curvature=-0.20,
-            tracking_errors={"e_y": 0.0, "e_psi": 0.0, "reference_yaw": 0.0},
-        )
-
-        self.assertAlmostEqual(control.steer, -0.10)
-
-    def test_turn_in_guard_allows_full_rate_on_tight_curve(self):
-        controller = LqrController(
-            q_weights=(0.0, 0.0, 0.0, 0.0),
-            r_weight=1.0,
-            max_steer=0.65,
-            max_steer_rate=0.20,
-            curvature_alpha=1.0,
-            turn_in_rate_scale=0.5,
-            turn_in_guard_max_curvature=0.04,
-        )
-        vehicle = StaticVehicle()
-        waypoint = make_waypoint()
-
-        control = controller.run_step(
-            vehicle,
-            waypoint,
-            curvature=-0.20,
-            tracking_errors={"e_y": 0.0, "e_psi": 0.0, "reference_yaw": 0.0},
-        )
-
-        self.assertAlmostEqual(control.steer, -0.20)
-
-    def test_turn_in_guard_allows_full_rate_when_already_offset(self):
-        controller = LqrController(
-            q_weights=(0.0, 0.0, 0.0, 0.0),
-            r_weight=1.0,
-            max_steer=0.65,
-            max_steer_rate=0.20,
-            curvature_alpha=1.0,
-            turn_in_rate_scale=0.5,
-            turn_in_guard_lateral_error=0.9,
-            inside_error_feedforward_min_scale=1.0,
-        )
-        vehicle = StaticVehicle()
-        waypoint = make_waypoint()
-
-        control = controller.run_step(
-            vehicle,
-            waypoint,
-            curvature=-0.20,
-            tracking_errors={"e_y": -1.2, "e_psi": 0.0, "reference_yaw": 0.0},
-        )
-
-        self.assertAlmostEqual(control.steer, -0.20)
 
 
 if __name__ == "__main__":

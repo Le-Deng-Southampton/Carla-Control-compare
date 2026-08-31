@@ -1,3 +1,11 @@
+[CmdletBinding(PositionalBinding = $false)]
+param(
+    [switch]$HealthCheck,
+    [int]$HealthPort = 2000,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$RunArgs
+)
+
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -20,9 +28,15 @@ try {
     else {
         $env:PYTHONPATH = "$projectRoot;$existingPythonPath"
     }
-    & $conda run -n carla37 python $projectRoot\run_my_control.py @args
+    if ($HealthCheck) {
+        & $conda run -n carla37 python $projectRoot\carla_health.py --port $HealthPort --timeout 2.0
+    }
+    else {
+        & $conda run -n carla37 python $projectRoot\run_my_control.py @RunArgs
+    }
     if ($LASTEXITCODE -ne 0) {
-        throw "run_my_control.py failed with exit code $LASTEXITCODE"
+        $commandName = if ($HealthCheck) { "carla_health.py" } else { "run_my_control.py" }
+        throw "$commandName failed with exit code $LASTEXITCODE"
     }
 }
 finally {

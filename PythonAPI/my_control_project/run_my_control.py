@@ -15,6 +15,7 @@ import carla
 import pygame
 
 from control import get_supported_controller_names
+from control.authoritative_baseline import authoritative_audit
 from error_providers import get_supported_error_provider_names
 from experiment import (
     build_summary,
@@ -57,6 +58,12 @@ def _add_configured_arguments(parser):
         parser.add_argument(*flags, **kwargs)
 
 
+def _controller_implementation_audit(args):
+    if args.controller_implementation == "authoritative_baseline":
+        return authoritative_audit()
+    return None
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Run controller comparison on a fixed CARLA route.")
     parser.add_argument(
@@ -65,6 +72,17 @@ def parse_args():
         choices=get_supported_controller_names(),
         default=list(DEFAULT_CONTROLLER_ORDER),
         help="Controllers to include in the comparison run.",
+    )
+    parser.add_argument(
+        "--controller-implementation",
+        choices=("optimized", "authoritative_baseline"),
+        default="optimized",
+        help="Controller implementation used for every selected controller.",
+    )
+    parser.add_argument(
+        "--evaluation-headless",
+        action="store_true",
+        help="Disable display/event handling for deterministic batch evaluation.",
     )
     parser.add_argument(
         "--map-name",
@@ -238,8 +256,14 @@ def load_selected_world(client, args):
     return world
 
 
-def build_run_output_dir(log_dir, run_timestamp, seed, route_shape):
+def build_run_output_dir(log_dir, run_timestamp, seed, route_shape, run_label=""):
     run_dir_name = f"run_{run_timestamp}_seed_{seed}_{route_shape}"
+    if run_label:
+        safe_label = "".join(
+            character if character.isalnum() or character in "-_" else "_"
+            for character in str(run_label)
+        )
+        run_dir_name = f"{run_dir_name}_{safe_label}"
     return os.path.join(log_dir, run_dir_name)
 
 
@@ -361,6 +385,8 @@ def assert_frozen_trajectory(trajectory, frozen_hash):
 def build_run_config(args, controller_order, spawn_index, destination_index, destination, route_trace, route_features, trajectory):
     return {
         "controllers": list(controller_order),
+        "controller_implementation": args.controller_implementation,
+        "authoritative_baseline_audit": _controller_implementation_audit(args),
         "destination_index": destination_index,
         "destination_location": _location_config(destination),
         "error_provider": args.error_provider,
@@ -423,7 +449,17 @@ def compare_main():
         args.route_label = route_features.get("route_label", args.route_shape)
 
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_output_dir = build_run_output_dir(LOG_DIR, timestamp_str, args.seed, args.route_shape)
+        run_label = "{}_{}".format(
+            args.evaluation_case_id,
+            "-".join(args.controllers),
+        )
+        run_output_dir = build_run_output_dir(
+            LOG_DIR,
+            timestamp_str,
+            args.seed,
+            args.route_shape,
+            run_label=run_label,
+        )
         os.makedirs(run_output_dir, exist_ok=True)
         frozen_hash = trajectory.content_hash()
         save_reference_trajectory(

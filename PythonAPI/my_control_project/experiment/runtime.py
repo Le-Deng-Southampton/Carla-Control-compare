@@ -1,6 +1,7 @@
 from queue import Empty, Queue
 from dataclasses import dataclass
 import json
+import time
 
 import carla
 import numpy as np
@@ -21,6 +22,7 @@ from speed_planning import CurvatureSpeedPlanner, SpeedPlannerConfig
 
 from .logging import append_step_data, build_step_snapshot, log_step
 from .metrics import create_metrics
+from .perturbations import apply_vehicle_perturbation
 from .termination import CollisionZeroSpeedTerminator
 
 
@@ -211,6 +213,16 @@ def _resolve_speed_limit_profile(controller_name, args):
     return CONTROLLER_SPEED_LIMIT_PROFILES.get(controller_name)
 
 
+def _controller_lateral_acceleration_cap(controller_name, args):
+    """Return the lateral capability already enforced by a lateral controller."""
+    controller_field = {
+        "mpc": "mpc_max_lateral_accel",
+    }.get(controller_name)
+    if controller_field is None:
+        return None
+    return max(float(arg_value(args, controller_field)), 0.0)
+
+
 def build_speed_planner(args, controller_name=None):
     profile = _resolve_speed_limit_profile(controller_name, args) or {}
 
@@ -220,12 +232,22 @@ def build_speed_planner(args, controller_name=None):
     def scaled_deg_arg(name, scale_key):
         return np.radians(scaled_arg(name, scale_key))
 
+    planned_lateral_accel = scaled_arg(
+        "speed_planner_max_lateral_accel",
+        "max_lateral_accel_scale",
+    )
+    controller_lateral_accel = (
+        _controller_lateral_acceleration_cap(controller_name, args) if profile else None
+    )
+    if controller_lateral_accel is not None:
+        planned_lateral_accel = min(planned_lateral_accel, controller_lateral_accel)
+
     return CurvatureSpeedPlanner(
         SpeedPlannerConfig(
             base_target_speed_kmh=arg_value(args, "target_speed"),
             min_turn_speed_kmh=scaled_arg("speed_planner_min_turn_speed", "min_turn_speed_scale"),
             recovery_min_speed_kmh=scaled_arg("speed_planner_recovery_min_speed", "recovery_min_speed_scale"),
-            max_lateral_accel=scaled_arg("speed_planner_max_lateral_accel", "max_lateral_accel_scale"),
+            max_lateral_accel=planned_lateral_accel,
             max_accel=arg_value(args, "speed_planner_max_accel"),
             max_decel=arg_value(args, "speed_planner_max_decel"),
             lateral_error_warning=scaled_arg("speed_planner_lateral_error_warning", "lateral_error_scale"),
@@ -332,6 +354,19 @@ def get_vehicle_blueprint(world):
     return blueprint_library, vehicle_bps[0]
 
 
+def is_retryable_route_error(exc):
+    message = str(exc)
+    return (
+        "speed-feasible" in message
+        or "Failed to build true_straight route" in message
+        or "Failed to build curvy route" in message
+    )
+
+
+def is_headless_evaluation(args):
+    return bool(getattr(args, "evaluation_headless", False))
+
+
 def resolve_route_setup(world, args, clamp_spawn_index, rng):
     spawn_points = world.get_map().get_spawn_points()
     if not spawn_points:
@@ -377,11 +412,7 @@ def resolve_route_setup(world, args, clamp_spawn_index, rng):
             break
         except RuntimeError as exc:
             last_route_error = exc
-            retryable_route_error = (
-                "speed-feasible" in str(exc)
-                or "Failed to build curvy route" in str(exc)
-            )
-            if args.spawn_index is not None or not retryable_route_error:
+            if args.spawn_index is not None or not is_retryable_route_error(exc):
                 raise
 
     if route_trace is None:
@@ -478,8 +509,14 @@ def resolve_route_setup(world, args, clamp_spawn_index, rng):
 
 
 def create_experiment_runtime(controller_name, vehicle, args):
+    if getattr(args, "controller_implementation", "optimized") == "authoritative_baseline":
+        from control.authoritative_baseline import create_authoritative_controller
+
+        controller = create_authoritative_controller(controller_name, vehicle, args)
+    else:
+        controller = create_tracking_controller(controller_name, vehicle, args)
     return {
-        "controller": create_tracking_controller(controller_name, vehicle, args),
+        "controller": controller,
         "error_provider": create_error_provider(args.error_provider, args),
         "speed_planner": build_speed_planner(args, controller_name=controller_name),
     }
@@ -521,6 +558,25 @@ def apply_controller_step(
         planned_target_speed_mps=planned_target_speed_mps,
         tracking_errors=tracking_errors,
     )
+
+
+def timed_controller_step(operation, clock=time.perf_counter):
+    start = clock()
+    control = operation()
+    return control, (clock() - start) * 1000.0
+
+
+def next_metric_time(metrics, control_dt):
+    """Return a lap-relative, monotonic timestamp for control metrics.
+
+    CARLA's world elapsed time can reset when the simulator reloads a map or
+    recovers a streamed world.  The evaluation loop is configured at a fixed
+    control period, so metric integration must use that period rather than a
+    server-global clock that may jump backwards mid-lap.
+    """
+    previous = metrics.get("time", [])
+    step = max(float(control_dt), 1.0e-6)
+    return (float(previous[-1]) + step) if previous else 0.0
 
 
 def select_route_target(route_trace, vehicle_loc, last_index, look_ahead):
@@ -577,6 +633,14 @@ def run_controller_lap(
     try:
         vehicle = world.spawn_actor(vehicle_bp, spawn_point)
         vehicle.set_autopilot(False)
+        metrics["vehicle_perturbation_audit"] = apply_vehicle_perturbation(
+            vehicle,
+            {
+                "vehicle_mass_scale": arg_value(args, "vehicle_mass_scale"),
+                "vehicle_moi_scale": arg_value(args, "vehicle_moi_scale"),
+                "tire_friction_scale": arg_value(args, "tire_friction_scale"),
+            },
+        )
         collision_bp = blueprint_library.find("sensor.other.collision")
         collision_sensor = world.spawn_actor(collision_bp, carla.Transform(), attach_to=vehicle)
 
@@ -591,18 +655,21 @@ def run_controller_lap(
             hold_steps=arg_value(args, "tracker_hold_steps"),
         )
         trajectory_hash = reference_trajectory.content_hash()
-        camera, image_queue = spawn_camera(world, blueprint_library, vehicle, display_width, display_height)
-        hud = SimpleHUD(display_width, display_height)
-        clock = pygame.time.Clock()
+        headless = is_headless_evaluation(args)
+        if not headless:
+            camera, image_queue = spawn_camera(world, blueprint_library, vehicle, display_width, display_height)
+            hud = SimpleHUD(display_width, display_height)
+            clock = pygame.time.Clock()
 
         print(f"Starting {controller_name.upper()} lap from the same spawn point.")
 
         while True:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    return rows, positions_x, positions_y, metrics, True
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    return rows, positions_x, positions_y, metrics, True
+            if not headless:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        return rows, positions_x, positions_y, metrics, True
+                    if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                        return rows, positions_x, positions_y, metrics, True
 
             world.tick()
             vehicle_loc = vehicle.get_location()
@@ -655,17 +722,19 @@ def run_controller_lap(
                     lateral_error_m=tracking_errors["e_y"],
                     heading_error_rad=tracking_errors["e_psi"],
                 )
-            control = apply_controller_step(
-                runtime["controller"],
-                vehicle,
-                target_waypoint,
-                route_trace,
-                route_index,
-                reference_waypoint,
-                closest_route_index,
-                planned_target_speed_mps=target_speed_ms,
-                tracking_errors=tracking_errors,
-                reference_tracker=tracker,
+            control, controller_runtime_ms = timed_controller_step(
+                lambda: apply_controller_step(
+                    runtime["controller"],
+                    vehicle,
+                    target_waypoint,
+                    route_trace,
+                    route_index,
+                    reference_waypoint,
+                    closest_route_index,
+                    planned_target_speed_mps=target_speed_ms,
+                    tracking_errors=tracking_errors,
+                    reference_tracker=tracker,
+                )
             )
             vehicle.apply_control(control)
 
@@ -678,6 +747,7 @@ def run_controller_lap(
                 speed_plan_risk=runtime["speed_planner"].last_risk,
                 speed_plan_reason=runtime["speed_planner"].last_reason,
                 controller_debug={
+                    "controller_runtime_ms": controller_runtime_ms,
                     "controller_speed_profile": getattr(
                         runtime["controller"],
                         "last_speed_profile",
@@ -720,7 +790,7 @@ def run_controller_lap(
             })
             previous_steer = control.steer
             previous_speed = snapshot["speed"]
-            sim_time = world.get_snapshot().timestamp.elapsed_seconds
+            sim_time = next_metric_time(metrics, getattr(args, "control_dt", CONTROL_DT))
             append_step_data(
                 rows,
                 positions_x,
@@ -733,18 +803,20 @@ def run_controller_lap(
                 control,
                 sim_time,
             )
-            render_frame(
-                display,
-                image_queue,
-                hud,
-                vehicle,
-                control,
-                controller_name,
-                clock,
-                target_speed_mps=target_speed_ms,
-                speed_planner_mode=args.speed_planner_mode,
-            )
-            log_step(controller_name, route_trace, route_index, snapshot, control)
+            if not headless:
+                render_frame(
+                    display,
+                    image_queue,
+                    hud,
+                    vehicle,
+                    control,
+                    controller_name,
+                    clock,
+                    target_speed_mps=target_speed_ms,
+                    speed_planner_mode=args.speed_planner_mode,
+                )
+            if not headless:
+                log_step(controller_name, route_trace, route_index, snapshot, control)
 
             if zero_speed_terminator.update(snapshot["speed"], sim_time, collision_count[0]):
                 print(

@@ -6,25 +6,6 @@ from .base import BaseTrackingController
 from .longitudinal import PidLongitudinalController
 
 
-def _resolve_preview_curvature(curvature, blend):
-    values = np.asarray(curvature, dtype=float).reshape(-1)
-    if values.size == 0:
-        return 0.0, 0.0
-
-    current_curvature = float(values[0])
-    if values.size == 1:
-        return current_curvature, current_curvature
-
-    weights = np.linspace(1.0, 0.40, values.size)
-    preview_curvature = float(values[int(np.argmax(np.abs(values) * weights))])
-    resolved_blend = float(np.clip(blend, 0.0, 1.0))
-    feedforward_curvature = (
-        (1.0 - resolved_blend) * current_curvature
-        + resolved_blend * preview_curvature
-    )
-    return current_curvature, feedforward_curvature
-
-
 class PidControllerAdapter(BaseTrackingController):
     """Project-level adapter around CARLA's built-in PID controller."""
 
@@ -43,25 +24,15 @@ class PidControllerAdapter(BaseTrackingController):
         max_brake=0.28,
         max_steering=0.65,
         max_steer_rate=0.65,
-        curvature_feedforward_gain=0.0,
-        curvature_preview_horizon=10,
-        curvature_preview_blend=0.55,
-        derivative_filter_alpha=1.0,
-        integral_error_limit=np.radians(20.0),
-        integral_separation_lateral_error=1.4,
-        integral_separation_heading_error=np.radians(18.0),
+        derivative_filter_alpha=0.50,
         speed_scheduling_enabled=True,
         longitudinal_controller=None,
     ):
         self.max_steer = max_steering
         self.max_steer_rate = max_steer_rate
-        self.curvature_feedforward_gain = curvature_feedforward_gain
-        self.curvature_preview_blend = curvature_preview_blend
         self.derivative_filter_alpha = float(np.clip(derivative_filter_alpha, 0.0, 1.0))
         self.speed_scheduling_enabled = speed_scheduling_enabled
-        self.supports_curvature_sequence = True
-        self.horizon = max(int(curvature_preview_horizon), 1)
-        self.L = 2.90
+        self.supports_curvature_sequence = False
         self._lat_controller = PIDLateralController(
             vehicle,
             K_P=lat_kp,
@@ -80,7 +51,6 @@ class PidControllerAdapter(BaseTrackingController):
         )
         self.past_steering = 0.0
         self.last_speed_profile = "pid_base"
-        self.last_curvature_feedforward_scale = 1.0
         self.last_raw_steer = 0.0
         self.last_steer_rate_limit = 0.0
         self.last_steer_rate_limited = False
@@ -90,17 +60,6 @@ class PidControllerAdapter(BaseTrackingController):
         self.last_filtered_lateral_derivative = 0.0
         self.last_derivative_filter_applied = False
         self._filtered_lateral_derivative = 0.0
-
-    def _lateral_error_buffer_snapshot(self):
-        if not hasattr(self._lat_controller, "_e_buffer"):
-            return None
-        return tuple(self._lat_controller._e_buffer)
-
-    def _restore_lateral_error_buffer(self, errors):
-        if errors is None or not hasattr(self._lat_controller, "_e_buffer"):
-            return
-        self._lat_controller._e_buffer.clear()
-        self._lat_controller._e_buffer.extend(errors)
 
     def _steer_rate_limit(self):
         return max(float(self.max_steer_rate), 0.0)
@@ -167,20 +126,8 @@ class PidControllerAdapter(BaseTrackingController):
             speed_mps,
             target_speed_mps=planned_target_speed_mps,
         )
-        current_curvature, feedforward_curvature = _resolve_preview_curvature(
-            curvature,
-            self.curvature_preview_blend,
-        )
-        self.last_curvature_feedforward_scale = 1.0
-        steer_ff = (
-            self.curvature_feedforward_gain
-            * np.arctan(self.L * feedforward_curvature)
-        )
-        buffer_before = self._lateral_error_buffer_snapshot()
-        derivative_before = self._filtered_lateral_derivative
         steer_fb = self._lat_controller.run_step(target_waypoint)
-        steer_fb = self._filtered_lateral_feedback(steer_fb)
-        requested_steering = steer_fb + steer_ff
+        requested_steering = self._filtered_lateral_feedback(steer_fb)
 
         steer_rate_limit = self._steer_rate_limit()
         current_steering = float(np.clip(
@@ -193,19 +140,13 @@ class PidControllerAdapter(BaseTrackingController):
             steering = min(self.max_steer, current_steering)
         else:
             steering = max(-self.max_steer, current_steering)
-        if buffer_before is not None and self._lat_controller._e_buffer:
-            newest_error = float(self._lat_controller._e_buffer[-1])
-            limiting_direction = float(requested_steering - steering)
-            if abs(limiting_direction) > 1e-9 and newest_error * limiting_direction > 0.0:
-                self._restore_lateral_error_buffer(buffer_before)
-                self._filtered_lateral_derivative = derivative_before
-                self.last_filtered_lateral_derivative = derivative_before
-
         self.last_raw_steer = float(requested_steering)
         self.last_steer_rate_limit = float(steer_rate_limit)
         self.last_steer_rate_limited = abs(steering - requested_steering) > 1e-9
-        self.last_current_curvature = float(current_curvature)
-        self.last_preview_curvature = float(feedforward_curvature)
+        curvature_values = np.asarray(curvature, dtype=float).reshape(-1)
+        current_curvature = float(curvature_values[0]) if curvature_values.size else 0.0
+        self.last_current_curvature = current_curvature
+        self.last_preview_curvature = current_curvature
 
         control = carla.VehicleControl()
         control.steer = steering
@@ -219,7 +160,6 @@ class PidControllerAdapter(BaseTrackingController):
     def reset(self):
         self.past_steering = 0.0
         self.last_speed_profile = "pid_base"
-        self.last_curvature_feedforward_scale = 1.0
         self.last_raw_steer = 0.0
         self.last_steer_rate_limit = 0.0
         self.last_steer_rate_limited = False

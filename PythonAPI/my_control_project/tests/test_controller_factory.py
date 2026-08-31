@@ -4,9 +4,6 @@ import types
 import unittest
 from types import SimpleNamespace
 
-import numpy as np
-
-
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PYTHONAPI_ROOT = os.path.dirname(PROJECT_ROOT)
 CARLA_AGENTS_ROOT = os.path.join(PYTHONAPI_ROOT, "carla")
@@ -49,15 +46,6 @@ def build_args(**overrides):
         "lqr_max_steer": 0.55,
         "lqr_max_steer_rate": 0.16,
         "lqr_curvature_alpha": 0.50,
-        "lqr_feedforward_gain": 1.0,
-        "lqr_turn_in_rate_scale": 0.70,
-        "lqr_turn_in_guard_lateral_error": 1.0,
-        "lqr_turn_in_guard_heading_error": 10.0,
-        "lqr_turn_in_guard_max_curvature": 0.04,
-        "lqr_inside_error_feedforward_start": 0.80,
-        "lqr_inside_error_feedforward_full": 1.80,
-        "lqr_inside_error_feedforward_min_scale": 0.65,
-        "lqr_inside_error_feedforward_heading_limit": 4.0,
         "pid_lat_kp": 0.72,
         "pid_lat_ki": 0.005,
         "pid_lat_kd": 0.38,
@@ -110,38 +98,30 @@ class ControllerFactoryTest(unittest.TestCase):
             build_args(
                 pid_max_steer=0.55,
                 pid_max_steer_rate=0.12,
-                pid_curvature_feedforward_gain=0.30,
-                pid_curvature_preview_horizon=7,
-                pid_curvature_preview_blend=0.40,
                 pid_derivative_filter_alpha=0.40,
             ),
         )
 
         self.assertEqual(controller.max_steer, 0.55)
         self.assertEqual(controller.max_steer_rate, 0.12)
-        self.assertEqual(controller.curvature_feedforward_gain, 0.30)
-        self.assertEqual(controller.horizon, 7)
-        self.assertEqual(controller.curvature_preview_blend, 0.40)
         self.assertEqual(controller.derivative_filter_alpha, 0.40)
 
-    def test_lqr_inside_curve_feedforward_params_can_be_overridden(self):
+    def test_lqr_retained_curvature_modules_can_be_overridden(self):
         controller = create_tracking_controller(
             "lqr",
             FakeVehicle(),
             build_args(
-                lqr_inside_error_feedforward_start=0.25,
-                lqr_inside_error_feedforward_full=0.8,
-                lqr_inside_error_feedforward_min_scale=0.4,
-                lqr_inside_error_feedforward_heading_limit=12.0,
-                lqr_turn_in_guard_max_curvature=0.06,
+                lqr_curvature_alpha=0.35,
+                lqr_curvature_preview_horizon=9,
+                lqr_curvature_preview_blend=0.25,
+                lqr_max_lateral_accel=5.5,
             ),
         )
 
-        self.assertEqual(controller.inside_error_feedforward_start, 0.25)
-        self.assertEqual(controller.inside_error_feedforward_full, 0.8)
-        self.assertEqual(controller.inside_error_feedforward_min_scale, 0.4)
-        self.assertAlmostEqual(controller.inside_error_feedforward_heading_limit, np.radians(12.0))
-        self.assertEqual(controller.turn_in_guard_max_curvature, 0.06)
+        self.assertEqual(controller.curvature_alpha, 0.35)
+        self.assertEqual(controller.horizon, 9)
+        self.assertEqual(controller.curvature_preview_blend, 0.25)
+        self.assertEqual(controller.max_lateral_accel, 5.5)
 
 
 if __name__ == "__main__":

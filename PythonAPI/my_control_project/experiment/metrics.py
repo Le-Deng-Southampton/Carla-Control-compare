@@ -2,13 +2,15 @@ import json
 
 import numpy as np
 
-from project_config import SUMMARY_CONTROLLER_PARAM_FIELDS, arg_values
+from project_config import SUMMARY_CONTROLLER_PARAM_FIELDS, arg_value, arg_values
 
+from .evaluation_metrics import EVALUATION_SUMMARY_FIELDS, evaluate_step_series
 from .stability import analyze_stability
 
 
 EXPERIMENT_METADATA_HEADER = [
     "controller",
+    "evaluation_case_id",
     "error_provider",
     "speed_planner_mode",
     "speed_planner_limit_profile",
@@ -21,6 +23,9 @@ EXPERIMENT_METADATA_HEADER = [
     "perception_delay_steps",
     "perception_dropout_probability",
     "perception_smoothing_alpha",
+    "vehicle_mass_scale",
+    "vehicle_moi_scale",
+    "tire_friction_scale",
 ]
 
 SPEED_PLAN_REASONS = [
@@ -83,6 +88,13 @@ SUMMARY_METRIC_FIELDS = [
     "stability_passed",
     "stability_fail_reasons",
     "stability_fail_windows",
+    "nominal_vehicle_mass_kg",
+    "applied_vehicle_mass_kg",
+    "nominal_vehicle_moi_kg_m2",
+    "applied_vehicle_moi_kg_m2",
+    "nominal_tire_friction",
+    "applied_tire_friction",
+    *EVALUATION_SUMMARY_FIELDS,
     *[f"speed_plan_reason_{reason}_count" for reason in SPEED_PLAN_REASONS],
 ]
 
@@ -130,6 +142,11 @@ def create_metrics():
         "steer_delta_signed": [],
         "steer_rate_limit": [],
         "steer_rate_limited": [],
+        "controller_runtime_ms": [],
+        "e_y_signed": [],
+        "e_psi_signed": [],
+        "steer_signed": [],
+        "current_curvature": [],
         "lateral_accel_signed": [],
         "longitudinal_accel": [],
         "throttle": [],
@@ -152,6 +169,7 @@ def build_experiment_metadata(controller_name, args):
         speed_limit_profile = f"controller:{controller_name}"
     return [
         controller_name,
+        getattr(args, "evaluation_case_id", ""),
         args.error_provider,
         args.speed_planner_mode,
         speed_limit_profile,
@@ -164,6 +182,9 @@ def build_experiment_metadata(controller_name, args):
         args.perception_delay_steps,
         args.perception_dropout_probability,
         args.perception_smoothing_alpha,
+        arg_value(args, "vehicle_mass_scale"),
+        arg_value(args, "vehicle_moi_scale"),
+        arg_value(args, "tire_friction_scale"),
     ]
 
 
@@ -185,6 +206,8 @@ def build_summary(controller_name, spawn_index, route_trace, args, metrics, rout
         route_shape=args.route_shape,
         error_provider=args.error_provider,
     )
+    evaluation = evaluate_step_series(metrics)
+    perturbation_audit = metrics.get("vehicle_perturbation_audit", {})
     values = {
         "spawn_index": spawn_index,
         "route_waypoints": len(route_trace),
@@ -221,7 +244,18 @@ def build_summary(controller_name, spawn_index, route_trace, args, metrics, rout
         "mean_planned_speed_kmh": mean(target_speed) * 3.6,
         "min_planned_speed_kmh": min(target_speed or [0.0]) * 3.6,
         "max_planned_speed_kmh": max(target_speed or [0.0]) * 3.6,
+        "nominal_vehicle_mass_kg": perturbation_audit.get("nominal_mass", 0.0),
+        "applied_vehicle_mass_kg": perturbation_audit.get("applied_mass", 0.0),
+        "nominal_vehicle_moi_kg_m2": perturbation_audit.get("nominal_moi", 0.0),
+        "applied_vehicle_moi_kg_m2": perturbation_audit.get("applied_moi", 0.0),
+        "nominal_tire_friction": json.dumps(
+            perturbation_audit.get("nominal_tire_friction", []), separators=(",", ":")
+        ),
+        "applied_tire_friction": json.dumps(
+            perturbation_audit.get("applied_tire_friction", []), separators=(",", ":")
+        ),
         **stability,
+        **evaluation,
         **{f"speed_plan_reason_{reason}_count": reason_counts.get(reason, 0) for reason in SPEED_PLAN_REASONS},
         "planner_mode": route_features.get(
             "planner_mode_resolved",

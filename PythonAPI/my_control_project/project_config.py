@@ -111,6 +111,10 @@ CONTROLLER_SPEED_LIMIT_PROFILES = {
 }
 
 DEFAULTS = {
+    "evaluation_case_id": "",
+    "vehicle_mass_scale": 1.0,
+    "vehicle_moi_scale": 1.0,
+    "tire_friction_scale": 1.0,
     "target_speed": 70.0,
     "planner_mode": "frenet",
     "planner_fallback": "legacy",
@@ -180,12 +184,12 @@ DEFAULTS = {
     "lqr_ki_long": 0.01,
     "lqr_kd_long": 0.06,
     "lqr_max_steer": 0.60,
+    "lqr_max_lateral_accel": 6.0,
     "lqr_max_steer_rate": 0.22,
-    "lqr_derivative_alpha": 0.20,
     "lqr_curvature_alpha": 0.60,
-    "lqr_feedforward_gain": 1.0,
     "lqr_curvature_preview_horizon": 12,
     "lqr_curvature_preview_blend": 0.40,
+    "lqr_min_dynamic_steer_limit": 0.12,
     "mpc_horizon": 20,
     "mpc_q_y": 14.0,
     "mpc_q_psi": 22.0,
@@ -200,18 +204,9 @@ DEFAULTS = {
     "mpc_max_lateral_accel": 6.0,
     "mpc_min_dynamic_steer_limit": 0.24,
     "mpc_cornering_stiffness_scale": 1.0,
-    "mpc_min_horizon": 10,
-    "mpc_adaptive_horizon_enabled": False,
-    "mpc_model_type": "kinematic",
+    "mpc_model_type": "dynamic_bicycle",
     "mpc_derivative_alpha": 0.25,
-    "mpc_event_trigger_curvature": 0.008,
     "mpc_curvature_filter_alpha": 0.20,
-    "mpc_curvature_feedforward_gain": 1.0,
-    "mpc_small_error_steer_deadband_enabled": False,
-    "mpc_small_error_lateral_threshold": 0.08,
-    "mpc_small_error_heading_threshold": 0.8,
-    "mpc_small_error_steer_hold_delta": 0.006,
-    "mpc_small_error_current_curvature_threshold": 0.010,
     "debug_mpc_stability": False,
     "pid_lat_kp": 0.72,
     "pid_lat_ki": 0.005,
@@ -223,15 +218,16 @@ DEFAULTS = {
     "pid_max_brake": 0.28,
     "pid_max_steer": 0.65,
     "pid_max_steer_rate": 0.65,
-    "pid_curvature_feedforward_gain": 0.0,
-    "pid_curvature_preview_horizon": 10,
-    "pid_curvature_preview_blend": 0.55,
-    "pid_derivative_filter_alpha": 1.0,
+    "pid_derivative_filter_alpha": 0.50,
 }
 
 CLI_ARGUMENTS = (
     (("--spawn-index",), {"type": int, "default": None, "help": "Optional fixed spawn point index for repeatable tests."}),
     (("--destination-index",), {"type": int, "default": None, "help": "Optional fixed destination spawn point index for repeatable tests."}),
+    (("--evaluation-case-id",), {"default": DEFAULTS["evaluation_case_id"], "help": "Stable identifier for an evaluation matrix case."}),
+    (("--vehicle-mass-scale",), {"type": float, "default": DEFAULTS["vehicle_mass_scale"], "help": "Vehicle mass multiplier for robustness evaluation."}),
+    (("--vehicle-moi-scale",), {"type": float, "default": DEFAULTS["vehicle_moi_scale"], "help": "Vehicle yaw moment-of-inertia multiplier for robustness evaluation."}),
+    (("--tire-friction-scale",), {"type": float, "default": DEFAULTS["tire_friction_scale"], "help": "Wheel tire-friction multiplier for robustness evaluation."}),
     (("--target-speed",), {"type": float, "default": DEFAULTS["target_speed"], "help": "Target speed in km/h."}),
     (("--planner-mode",), {"choices": ("legacy", "frenet"), "default": DEFAULTS["planner_mode"], "help": "Reference planner used before all controller laps."}),
     (("--planner-fallback",), {"choices": ("legacy", "error"), "default": DEFAULTS["planner_fallback"], "help": "Expected Frenet failure policy: use legacy for normal runs or error for strict comparisons."}),
@@ -302,12 +298,12 @@ CLI_ARGUMENTS = (
     (("--lqr-ki-long",), {"type": float, "default": DEFAULTS["lqr_ki_long"], "help": "LQR controller longitudinal I gain."}),
     (("--lqr-kd-long",), {"type": float, "default": DEFAULTS["lqr_kd_long"], "help": "LQR controller longitudinal D gain."}),
     (("--lqr-max-steer",), {"type": float, "default": DEFAULTS["lqr_max_steer"], "help": "Maximum LQR steering command."}),
+    (("--lqr-max-lateral-accel",), {"type": float, "default": DEFAULTS["lqr_max_lateral_accel"], "help": "Maximum lateral acceleration used for the LQR steering envelope."}),
     (("--lqr-max-steer-rate",), {"type": float, "default": DEFAULTS["lqr_max_steer_rate"], "help": "Maximum LQR steering change per control step."}),
-    (("--lqr-derivative-alpha",), {"type": float, "default": DEFAULTS["lqr_derivative_alpha"], "help": "Low-pass blend factor for LQR error derivative states."}),
-    (("--lqr-curvature-alpha",), {"type": float, "default": DEFAULTS["lqr_curvature_alpha"], "help": "Low-pass blend factor for LQR curvature feedforward."}),
-    (("--lqr-feedforward-gain",), {"type": float, "default": DEFAULTS["lqr_feedforward_gain"], "help": "Gain applied to LQR bicycle-model curvature feedforward."}),
-    (("--lqr-curvature-preview-horizon",), {"type": int, "default": DEFAULTS["lqr_curvature_preview_horizon"], "help": "Number of speed-scaled curvature samples used by LQR feedforward preview."}),
-    (("--lqr-curvature-preview-blend",), {"type": float, "default": DEFAULTS["lqr_curvature_preview_blend"], "help": "Blend from current curvature toward the strongest near-preview curvature for LQR feedforward."}),
+    (("--lqr-curvature-alpha",), {"type": float, "default": DEFAULTS["lqr_curvature_alpha"], "help": "Low-pass blend factor for the LQR reference-curvature signal."}),
+    (("--lqr-curvature-preview-horizon",), {"type": int, "default": DEFAULTS["lqr_curvature_preview_horizon"], "help": "Number of speed-scaled curvature samples used by LQR reference preview."}),
+    (("--lqr-curvature-preview-blend",), {"type": float, "default": DEFAULTS["lqr_curvature_preview_blend"], "help": "Blend from current curvature toward the strongest near-preview curvature for LQR yaw-rate error."}),
+    (("--lqr-min-dynamic-steer-limit",), {"type": float, "default": DEFAULTS["lqr_min_dynamic_steer_limit"], "help": "Minimum LQR steering authority retained by the lateral-acceleration envelope."}),
     (("--mpc-horizon",), {"type": int, "default": DEFAULTS["mpc_horizon"], "help": "MPC prediction horizon in control steps."}),
     (("--mpc-q-y",), {"type": float, "default": DEFAULTS["mpc_q_y"], "help": "MPC lateral error weight."}),
     (("--mpc-q-psi",), {"type": float, "default": DEFAULTS["mpc_q_psi"], "help": "MPC heading error weight."}),
@@ -322,18 +318,8 @@ CLI_ARGUMENTS = (
     (("--mpc-max-lateral-accel",), {"type": float, "default": DEFAULTS["mpc_max_lateral_accel"], "help": "Approximate lateral-acceleration limit in m/s^2 for MPC dynamic steering bounds."}),
     (("--mpc-min-dynamic-steer-limit",), {"type": float, "default": DEFAULTS["mpc_min_dynamic_steer_limit"], "help": "Minimum steering bound retained when MPC applies speed-based dynamic steering limits."}),
     (("--mpc-cornering-stiffness-scale",), {"type": float, "default": DEFAULTS["mpc_cornering_stiffness_scale"], "help": "Multiplier applied to MPC dynamic bicycle cornering stiffness terms."}),
-    (("--mpc-min-horizon",), {"type": int, "default": DEFAULTS["mpc_min_horizon"], "help": "Shortest MPC horizon used when event risk is low."}),
-    (("--mpc-enable-adaptive-horizon",), {"dest": "mpc_adaptive_horizon_enabled", "action": "store_true", "default": DEFAULTS["mpc_adaptive_horizon_enabled"], "help": "Enable MPC horizon shortening/extension based on speed and curve-entry risk."}),
-    (("--mpc-model-type",), {"choices": ("dynamic_bicycle", "kinematic"), "default": DEFAULTS["mpc_model_type"], "help": "Prediction model used by the MPC controller."}),
     (("--mpc-derivative-alpha",), {"type": float, "default": DEFAULTS["mpc_derivative_alpha"], "help": "Low-pass blend factor for MPC dynamic-model lateral-velocity and yaw-rate states."}),
-    (("--mpc-event-trigger-curvature",), {"type": float, "default": DEFAULTS["mpc_event_trigger_curvature"], "help": "Deprecated compatibility option; MPC now solves from the current state every control cycle."}),
     (("--mpc-curvature-filter-alpha",), {"type": float, "default": DEFAULTS["mpc_curvature_filter_alpha"], "help": "Frame-to-frame low-pass blend factor for MPC curvature preview."}),
-    (("--mpc-curvature-feedforward-gain",), {"type": float, "default": DEFAULTS["mpc_curvature_feedforward_gain"], "help": "Gain applied to MPC curvature feedforward reference steering."}),
-    (("--mpc-disable-small-error-steer-deadband",), {"dest": "mpc_small_error_steer_deadband_enabled", "action": "store_false", "default": DEFAULTS["mpc_small_error_steer_deadband_enabled"], "help": "Deprecated compatibility option; the MPC steering deadband is always disabled."}),
-    (("--mpc-small-error-lateral-threshold",), {"type": float, "default": DEFAULTS["mpc_small_error_lateral_threshold"], "help": "Lateral-error threshold in meters for MPC small-error steering hold."}),
-    (("--mpc-small-error-heading-threshold",), {"type": float, "default": DEFAULTS["mpc_small_error_heading_threshold"], "help": "Heading-error threshold in degrees for MPC small-error steering hold."}),
-    (("--mpc-small-error-steer-hold-delta",), {"type": float, "default": DEFAULTS["mpc_small_error_steer_hold_delta"], "help": "Maximum steering delta held by MPC when lateral and heading errors are small."}),
-    (("--mpc-small-error-current-curvature-threshold",), {"type": float, "default": DEFAULTS["mpc_small_error_current_curvature_threshold"], "help": "Current curvature threshold above which MPC small-error steering changes are released."}),
     (("--debug-mpc-stability",), {"action": "store_true", "default": DEFAULTS["debug_mpc_stability"], "help": "Print MPC stability diagnostics including profile, curvature, steering, and solve mode."}),
     (("--pid-lat-kp",), {"type": float, "default": DEFAULTS["pid_lat_kp"], "help": "PID lateral P gain."}),
     (("--pid-lat-ki",), {"type": float, "default": DEFAULTS["pid_lat_ki"], "help": "PID lateral I gain."}),
@@ -345,9 +331,6 @@ CLI_ARGUMENTS = (
     (("--pid-max-brake",), {"type": float, "default": DEFAULTS["pid_max_brake"], "help": "Maximum PID brake command."}),
     (("--pid-max-steer",), {"type": float, "default": DEFAULTS["pid_max_steer"], "help": "Maximum absolute PID steering command."}),
     (("--pid-max-steer-rate",), {"type": float, "default": DEFAULTS["pid_max_steer_rate"], "help": "Maximum PID steering change per control step."}),
-    (("--pid-curvature-feedforward-gain",), {"type": float, "default": DEFAULTS["pid_curvature_feedforward_gain"], "help": "Gain applied to PID bicycle-model curvature feedforward."}),
-    (("--pid-curvature-preview-horizon",), {"type": int, "default": DEFAULTS["pid_curvature_preview_horizon"], "help": "Number of curvature samples used by PID feedforward preview."}),
-    (("--pid-curvature-preview-blend",), {"type": float, "default": DEFAULTS["pid_curvature_preview_blend"], "help": "Blend from current curvature toward near-preview curvature for PID feedforward."}),
     (("--pid-derivative-filter-alpha",), {"type": float, "default": DEFAULTS["pid_derivative_filter_alpha"], "help": "Low-pass blend factor for the PID lateral derivative term; 1.0 preserves CARLA behavior."}),
 )
 
@@ -364,12 +347,12 @@ LQR_SUMMARY_PARAM_FIELDS = (
     "lqr_q_epsi_dot",
     "lqr_r",
     "lqr_max_steer",
+    "lqr_max_lateral_accel",
     "lqr_max_steer_rate",
-    "lqr_derivative_alpha",
     "lqr_curvature_alpha",
-    "lqr_feedforward_gain",
     "lqr_curvature_preview_horizon",
     "lqr_curvature_preview_blend",
+    "lqr_min_dynamic_steer_limit",
 )
 
 LQR_STEP_PARAM_FIELDS = (
@@ -393,18 +376,9 @@ MPC_PARAM_FIELDS = (
     "mpc_max_lateral_accel",
     "mpc_min_dynamic_steer_limit",
     "mpc_cornering_stiffness_scale",
-    "mpc_min_horizon",
-    "mpc_adaptive_horizon_enabled",
     "mpc_model_type",
     "mpc_derivative_alpha",
-    "mpc_event_trigger_curvature",
     "mpc_curvature_filter_alpha",
-    "mpc_curvature_feedforward_gain",
-    "mpc_small_error_steer_deadband_enabled",
-    "mpc_small_error_lateral_threshold",
-    "mpc_small_error_heading_threshold",
-    "mpc_small_error_steer_hold_delta",
-    "mpc_small_error_current_curvature_threshold",
     "debug_mpc_stability",
 )
 
@@ -417,6 +391,8 @@ PID_PARAM_FIELDS = (
     "pid_long_kd",
     "pid_max_throttle",
     "pid_max_brake",
+    "pid_max_steer",
+    "pid_max_steer_rate",
     "pid_derivative_filter_alpha",
 )
 
@@ -475,7 +451,5 @@ def controller_args_dict(args, controller_name):
     config = {}
     for attr in RUN_CONFIG_CONTROLLER_FIELDS[controller_name]:
         key = attr[len(prefix):] if attr.startswith(prefix) else attr
-        if key == "small_error_heading_threshold":
-            key = f"{key}_deg"
         config[key] = arg_value(args, attr)
     return config

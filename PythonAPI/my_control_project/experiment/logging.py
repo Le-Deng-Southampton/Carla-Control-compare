@@ -37,6 +37,7 @@ STEP_LOG_FIELDS = [
     "limited_steer",
     "steer_rate_limit",
     "steer_rate_limited",
+    "controller_runtime_ms",
     "throttle",
     "brake",
     "target_speed",
@@ -177,6 +178,7 @@ def build_step_snapshot(
         "limited_steer": control.steer,
         "steer_rate_limit": controller_debug.get("steer_rate_limit", 0.0),
         "steer_rate_limited": controller_debug.get("steer_rate_limited", False),
+        "controller_runtime_ms": controller_debug.get("controller_runtime_ms", 0.0),
         "target_speed": target_speed_ms,
         "speed_plan_risk": speed_plan_risk,
         "speed_plan_reason": speed_plan_reason,
@@ -220,6 +222,11 @@ def append_step_data(rows, positions_x, positions_y, metrics, controller_name, a
     metrics["steer_delta_signed"].append(snapshot["steer_delta"])
     metrics["steer_rate_limit"].append(snapshot["steer_rate_limit"])
     metrics["steer_rate_limited"].append(bool(snapshot["steer_rate_limited"]))
+    metrics["controller_runtime_ms"].append(snapshot["controller_runtime_ms"])
+    metrics["e_y_signed"].append(snapshot["e_y"])
+    metrics["e_psi_signed"].append(snapshot["e_psi"])
+    metrics["steer_signed"].append(control.steer)
+    metrics["current_curvature"].append(snapshot["current_curvature"])
     metrics["lateral_accel_signed"].append(snapshot["lateral_accel"])
     metrics["longitudinal_accel"].append(snapshot["longitudinal_accel"])
     metrics["throttle"].append(control.throttle)
