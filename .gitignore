@@ -40,6 +40,7 @@ TestResults.xml
 __pycache__/
 *.py[cod]
 *$py.class
+.idea/
 
 # Experiment outputs
 PythonAPI/my_control_project/log/

@@ -18,11 +18,18 @@ The packaged distribution includes, among other components:
 - upstream `PythonAPI/` content, except for the repository's custom
   `PythonAPI/my_control_project/` layer
 - `Plugins/`
+- root `CHANGELOG`, `Dockerfile`, and `Tools/`, which are retained as
+  distribution/build/support material associated with the packaged CARLA tree
+  where their individual provenance permits
 
 The setup script and wheel under `PythonAPI/carla/` are repository assets used
 by the current reproduction path; this note does not make a blanket originality
 or licensing claim about every file in that tree. Components under `Plugins/`
 must be checked against their own notices and licences.
+
+Security scanners may flag the TestPilot public debug signing keys under
+`Plugins/testpilot/`; these are upstream development materials retained with
+that third-party plugin, not author or production secrets.
 
 Upstream references are [CARLA on GitHub](https://github.com/carla-simulator/carla)
 and the [CARLA project site](https://carla.org/).

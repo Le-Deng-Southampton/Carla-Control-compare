@@ -1,3 +1,8 @@
+> Provenance note: this file is the original generic CARLA distribution README
+> retained under `docs/` after the repository's former top-level `README` was
+> moved. It documents the packaged upstream simulator and is not the project
+> research README.
+
 CARLA Simulator
 ===============
 

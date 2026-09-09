@@ -11,6 +11,22 @@ new PID, LQR, or MPC control law. The custom research layer is located in
 the simulator, maps, vehicle physics, actors, sensors, and standard actuation
 interface.
 
+## Documentation
+
+- [Reproducibility record](docs/REPRODUCIBILITY.md) — runtime pins, commands,
+  and the CARLA/runtime versus test-environment boundary.
+- [Dissertation mapping](docs/DISSERTATION_MAPPING.md) — section-to-component
+  index for the implementation and tests.
+- [Third-party CARLA boundary](docs/THIRD_PARTY.md) — bundled infrastructure,
+  provenance, and licensing scope.
+- [Packaged CARLA README](docs/CARLA_PACKAGED_README.md) — original generic
+  CARLA distribution instructions retained for provenance.
+
+The repository keeps the bundled CARLA distribution because the current
+reproduction path depends on it. The bundled server, maps, assets, physics,
+actors, sensors, upstream Python API, and plugins remain third-party
+components; see the boundary document above.
+
 ## Research scope
 
 The framework addresses a practical problem in controller comparison: a result
@@ -284,5 +300,6 @@ Detailed developer notes are available in
 
 ## License
 
-See [`LICENSE`](LICENSE). CARLA and bundled third-party components retain their
-respective licenses.
+See [`LICENSE`](LICENSE) for the bundled CARLA/CVC provenance text. That file
+does not settle an independent licence for the author research code; CARLA and
+other bundled third-party components retain their respective licences.

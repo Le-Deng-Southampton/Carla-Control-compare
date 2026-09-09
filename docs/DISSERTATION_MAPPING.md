@@ -5,11 +5,11 @@ or extend its claims.
 
 | Dissertation / evidence section | Repository component(s) |
 | --- | --- |
-| 3.3 Road planning | `PythonAPI/my_control_project/road_planning/` — route planning, reference construction, Frenet planning, tracking geometry, and reference tracking. |
-| 3.4 Error providers | `PythonAPI/my_control_project/error_providers/` — provider interface, ground-truth errors, and controlled noisy/perception-proxy perturbations. |
-| 3.5 Speed planning | `PythonAPI/my_control_project/speed_planning/` — adaptive target-speed planning. `Speed_Planing/` remains a compatibility import path. |
-| 3.6 Control | `PythonAPI/my_control_project/control/` — PID, LQR, MPC, shared longitudinal control, and comparison baselines. |
-| 3.8 Experiment | `PythonAPI/my_control_project/experiment/` — runtime, logging, termination, metrics, aggregation, reports, and evaluation workflows. |
+| 3.3 Reference Trajectory | `PythonAPI/my_control_project/road_planning/` — route planning, reference construction, Frenet planning, tracking geometry, and reference tracking. |
+| 3.4 Error Provider | `PythonAPI/my_control_project/error_providers/` — provider interface, ground-truth errors, and controlled noisy/perception-proxy perturbations. |
+| 3.5 Adaptive Speed Planning | `PythonAPI/my_control_project/speed_planning/` — adaptive target-speed planning. `Speed_Planing/` remains a compatibility import path. |
+| 3.6 Lateral Controller Implementation | `PythonAPI/my_control_project/control/` — PID, LQR, MPC, shared longitudinal control, and comparison baselines. |
+| 3.8 Runtime, Logging and Evaluation | `PythonAPI/my_control_project/experiment/` — runtime, logging, termination, metrics, aggregation, reports, and evaluation workflows. |
 | Software Testing | `PythonAPI/my_control_project/tests/` — unit and regression contracts for the project modules and scripts. |
 
 ## Supporting entrypoints and configuration
