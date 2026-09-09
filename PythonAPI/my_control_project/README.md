@@ -4,6 +4,19 @@ This directory contains the custom evaluation layer described in the repository
 [README](../../README.md). It runs traceable, matched CARLA experiments for the
 PID, LQR, and MPC controller platforms.
 
+Repository documentation:
+
+- [Reproducibility record](../../docs/REPRODUCIBILITY.md)
+- [Dissertation mapping](../../docs/DISSERTATION_MAPPING.md)
+- [Third-party CARLA boundary](../../docs/THIRD_PARTY.md)
+
+The project code is the custom evaluation layer; CARLA itself and the bundled
+server, maps, assets, physics, actors, sensors, upstream API, and plugins are
+third-party components. CARLA execution uses the pinned Python 3.7 `carla37`
+runtime and packaged wheel, while the unit-test suite is intended for a
+separate Python 3.8+ development environment. These environments are not
+interchangeable.
+
 ## Entry points
 
 - `run_my_control.py` parses the experiment configuration, prepares one frozen
